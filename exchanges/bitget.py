@@ -1,5 +1,4 @@
-import requests, json, time
-from pprint import pprint
+import requests
 
 def get_price_funding() -> dict:
     url = 'https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES'
@@ -19,8 +18,11 @@ def get_price_funding() -> dict:
 
     for item in data['data']:
         symbol = item.get('symbol')
-        price = item.get('indexPrice')
-        funding = item.get('fundingRate')
+        if float(item.get('lastPr')) > 0:
+            price = item.get('lastPr')
+        else:
+            continue
+        funding = float(item.get('fundingRate')) * 100
         time = item.get('ts')
         next_funding_time = None
 
@@ -54,22 +56,3 @@ def get_next_funding(symbol) -> dict:
     next_symbol_funding = data['data'][0]['nextFundingTime']
 
     return next_symbol_funding
-
-
-
-'''
-    for symbol in symbol:
-        params = {
-            "symbol": symbol,
-            "productType": "usdt-futures"
-        }
-        response = requests.get(url, params)
-
-        data = response.json()
-
-        if symbol == data['data'][0]['symbol']:
-
-            next_symbol_funding[data['data']][0]['symbol'] = data['data'][0]['nextFundingTime']
-    
-    print(next_symbol_funding)
-'''
