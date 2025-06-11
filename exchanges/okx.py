@@ -1,37 +1,138 @@
 import requests
+import websockets
+import asyncio
+import aiohttp
 import json
-from time import sleep
+from pprint import pprint
 
-"""
-Функция собирает прайсы, фандинги и время до следующего фандинга для каждого symbol
-и кидает в файл json.
-"""
 
-def get_fundings_and_price_from_api_to_json():
-    url_for_price = 'https://www.okx.com/api/v5/public/instruments?instType=SWAP'
-    url_for_funding = 'https://www.okx.com/api/v5/public/funding-rate?instType=FUTURES'
+class WS_okx:
+    def __init__(self):
+        self.symbols = []
+        self.instId_list = []
+        self.data = {'stock': 'okx'}
+        self.ready = False
+        self.url_4_symbols = 'https://www.okx.com/api/v5/public/instruments?instType=SWAP'
+        self.url_4_prices = 'wss://ws.okx.com:8443/ws/v5/public'
+        self.url_4_fundings = 'https://www.okx.com/api/v5/public/funding-rate?instId='
+        self.connection = False
 
-    try:
-        print('getting prices...')
-        response_price = requests.get(url_for_price)
-        response_price.raise_for_status()
-        print('...YES')
+    async def start_socket(self):
+        await self.get_symbols()
 
-        sleep(1)
+        while True:
+            try:
+                async with websockets.connect(self.url_4_prices) as websocket:
+                    self.connection = True
+                    for i in range(0, len(self.instId_list), 30):
+                        chunk = self.instId_list[i:i + 30]
+                        subscribe_settings = {
+                            "op": "subscribe",
+                            "args": [
+                                {
+                                    "channel": "tickers",
+                                    "instId": instid
+                                } for instid in chunk
+                            ]
+                        }
+                        await websocket.send(json.dumps(subscribe_settings))
+                        await asyncio.sleep(0.1)
+                    print('[OKX SOCKET] Подписка отправлена')
 
-        """
-        Фандинг каждого актива надо отдельно..........................
-        """
+                    while True:
+                        msg = await websocket.recv()
+                        message = json.loads(msg)
 
-        #print('getting fundings...')
-        #response_funding = requests.get(url_for_funding)
-        #response_funding.raise_for_status()
-        #print('...YES')
+                        if 'event' in message or 'data' not in message:
+                            continue
 
-    except requests.RequestException as error:
-        print(f'[OKX ERROR] Не смог получить данные: {error}')
-        return
+                        data = message['data'][0]
+                        symbol = data['instId'].replace('-', '').replace('SWAP', '')
 
-    data4price = response_price.json()
-    #data4funding = response_funding.json()
-    new_data = {}
+                        self.data[symbol]['price'] = data.get('last')
+                        self.data[symbol]['time'] = data.get('ts')
+
+
+            except Exception as error:
+                print(f'[OKX ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
+                await asyncio.sleep(5)
+
+
+
+
+    async def get_symbols(self):
+        self.instId_list = []
+        self.symbols = []
+        while True:
+            try:
+                print('[OKX] Сбор символов REST API')
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(self.url_4_symbols) as response:
+
+                        data = await response.json()
+                        data = data.get('data')
+
+                        for item in data:
+                            if item['settleCcy'] == 'USDT' and item['state'] == 'live' and item['ctType'] == 'linear':
+                                self.instId_list.append(item.get('instId'))
+
+                                symbol = item.get('uly').replace('-', '')
+                                funding = None
+                                price = None
+                                time = None
+                                next_funding_time = None
+
+                                self.symbols.append(symbol)
+
+                                self.data[symbol] = {
+                                    'price': price,
+                                    'funding': funding,
+                                    'next_funding_time': next_funding_time,
+                                    'time': time
+                                }
+
+                        return
+
+            except Exception as error:
+                print(f'[OKX ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
+                await asyncio.sleep(5)
+
+    def check_ready(self) -> bool:
+        if len(self.data) <= 30:
+            return False
+        self.ready = True
+        return True
+
+    def get_prices_data(self):
+        return self.data
+
+    async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
+        while True:
+            try:
+                print('[OKX SYSTEM] Сбор фандингов')
+                async with aiohttp.ClientSession() as session:
+
+                    funding_dict = {}
+
+                    for symbol in symbols_list:
+
+                        instId = symbol.removesuffix('USDT')+'-USDT-SWAP'
+                        url = self.url_4_fundings+instId
+                        async with session.get(url) as response:
+
+                            data = await response.json()
+
+                            if not data.get('data') or not data.get('code') == '0':
+                                continue
+
+                            funding = float(data['data'][0].get('fundingRate')) * 100
+                            next_funding_time = int(data['data'][0].get('nextFundingTime'))
+
+                            funding_dict[symbol] = {
+                                'funding': funding,
+                                'next_funding_time': next_funding_time,
+                            }
+
+                    return funding_dict
+            except Exception as error:
+                print(f'[OKX ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}\n{symbol}')

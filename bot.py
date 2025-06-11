@@ -1,10 +1,8 @@
 import telebot
 import config
 import controller
-from exchanges import binance, bitget
 from time import sleep
 from utils.normalization import smart_round,get_human_time
-from utils.calc import calc
 from pprint import pprint
 
 bot = telebot.TeleBot(config.BOT_TOKEN)

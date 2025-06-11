@@ -4,15 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1df73ad1-9ec2-4aa8-ac59-1d2967c5e5cf" name="Changes" comment="Новые биржи, фиксы, оптимизация&#10;Фиксы:&#10;- на binance теперь показывается правильный фандинг">
-      <change afterPath="$PROJECT_DIR$/controller.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+    <list default="true" id="1df73ad1-9ec2-4aa8-ac59-1d2967c5e5cf" name="Changes" comment="Выбор биржи&#10;Теперь можно выбрать биржу в конфиге для старта цикла сравнений&#10;На binance и bitget отображается время до следующего фандинга">
+      <change afterPath="$PROJECT_DIR$/exchanges/bitget_socket.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/new_bot.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils/math_operations.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/exchanges/binance.py" beforeDir="false" afterPath="$PROJECT_DIR$/exchanges/binance.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/exchanges/bitget.py" beforeDir="false" afterPath="$PROJECT_DIR$/exchanges/bitget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/exchanges/okx.py" beforeDir="false" afterPath="$PROJECT_DIR$/exchanges/okx.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/exchanges/binance_socket.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/calc.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/calc.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/checker.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/checker.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/normalization.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/normalization.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -51,20 +54,27 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Python.AIOGRAM.executor&quot;: &quot;Run&quot;,
+    &quot;Python.ASYNCIO_HUI_PIZDA_LOL_KEK.executor&quot;: &quot;Run&quot;,
+    &quot;Python.HUIPIZDA.executor&quot;: &quot;Run&quot;,
+    &quot;Python.JOPA_HUI_JOPA_SISKI_AHAHAHAHHA.executor&quot;: &quot;Run&quot;,
+    &quot;Python.JOPA_HUI_PIZDA.executor&quot;: &quot;Run&quot;,
     &quot;Python.binance.executor&quot;: &quot;Run&quot;,
+    &quot;Python.binance_socket.executor&quot;: &quot;Run&quot;,
     &quot;Python.binance_trade_status.executor&quot;: &quot;Run&quot;,
     &quot;Python.bitget.executor&quot;: &quot;Run&quot;,
     &quot;Python.bot.executor&quot;: &quot;Run&quot;,
     &quot;Python.controller.executor&quot;: &quot;Run&quot;,
     &quot;Python.fanding_calc.executor&quot;: &quot;Run&quot;,
+    &quot;Python.new_bot.executor&quot;: &quot;Run&quot;,
     &quot;Python.okx.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;
   }
 }</component>
-  <component name="RunManager" selected="Python.bot">
-    <configuration name="binance" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+  <component name="RunManager" selected="Python.new_bot">
+    <configuration name="AIOGRAM" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="trade_bot" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -77,7 +87,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/binance.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/AIOGRAM.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -86,7 +96,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="binance_trade_status" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="HUIPIZDA" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="trade_bot" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -99,7 +109,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/binance_trade_status.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/HUIPIZDA.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -108,7 +118,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="bitget" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="binance_socket" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="trade_bot" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -121,7 +131,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/bitget.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/binance_socket.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -130,7 +140,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="bot" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="new_bot" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="trade_bot" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -143,7 +153,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/bot.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/new_bot.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -152,7 +162,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="controller" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="okx" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="trade_bot" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -161,11 +171,11 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/exchanges" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/controller.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/exchanges/okx.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -176,11 +186,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.bot" />
-        <item itemvalue="Python.controller" />
-        <item itemvalue="Python.bitget" />
-        <item itemvalue="Python.binance" />
-        <item itemvalue="Python.binance_trade_status" />
+        <item itemvalue="Python.new_bot" />
+        <item itemvalue="Python.okx" />
+        <item itemvalue="Python.AIOGRAM" />
+        <item itemvalue="Python.HUIPIZDA" />
+        <item itemvalue="Python.binance_socket" />
       </list>
     </recent_temporary>
   </component>
@@ -216,11 +226,28 @@
       <option name="project" value="LOCAL" />
       <updated>1748598861926</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Выбор биржи&#10;Теперь можно выбрать биржу в конфиге для старта цикла сравнений&#10;На binance и bitget отображается время до следующего фандинга">
+      <option name="closed" value="true" />
+      <created>1748894442359</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1748894442359</updated>
+    </task>
+    <task id="LOCAL-00004" summary="Выбор биржи&#10;Теперь можно выбрать биржу в конфиге для старта цикла сравнений&#10;На binance и bitget отображается время до следующего фандинга">
+      <option name="closed" value="true" />
+      <created>1748894516256</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1748894516256</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Начальный коммит&#10;Бот может считать раскорреляция только между Binance и Bitget." />
-    <option name="LAST_COMMIT_MESSAGE" value="Начальный коммит&#10;Бот может считать раскорреляция только между Binance и Bitget." />
+    <MESSAGE value="Выбор биржи&#10;Теперь можно выбрать биржу в конфиге для старта цикла сравнений&#10;На binance и bitget отображается время до следующего фандинга" />
+    <option name="LAST_COMMIT_MESSAGE" value="Выбор биржи&#10;Теперь можно выбрать биржу в конфиге для старта цикла сравнений&#10;На binance и bitget отображается время до следующего фандинга" />
   </component>
 </project>
