@@ -2,25 +2,17 @@ import asyncio
 from exchanges.binance_socket import WS_binance
 from exchanges.bitget_socket import WS_bitget
 from exchanges.okx import WS_okx
-
+from exchanges.bybit_socket import WS_bybit
 from itertools import combinations
 from utils.math_operations import Calculator
 import config
-
-from utils.normalization import join_stocks_to_dict
-
-
-
-from utils.calc import calc
-from utils.normalization import get_human_time
-from pprint import pprint
 
 class Controller:
     def __init__(self):
         self.binance = WS_binance()
         self.bitget = WS_bitget()
         self.okx = WS_okx()
-        self.bybit = None
+        self.bybit = WS_bybit()
         self.gate = None
         self.calculator = Calculator()
         self.stocks_dict = {}
@@ -44,10 +36,15 @@ class Controller:
         print('[SYSTEM] Запускаем WebSocket OKX...')
         okx_task = asyncio.create_task(self.okx.start_socket())
 
+        print('[SYSTEM] Запускаем WebSocket BYBIT...')
+        bybit_task = asyncio.create_task(self.bybit.start_socket())
+
+
         ready = {
             'binance': False,
             'bitget': False,
-            'okx': False
+            'okx': False,
+            'bybit': False
         }
 
         while not all(ready.values()):
@@ -68,6 +65,12 @@ class Controller:
                 ready['okx'] = True
             elif not ready['okx']:
                 print('[SYSTEM] OKX ещё не готов. Ждём...')
+
+            if not ready['bybit'] and self.bybit.check_ready():
+                print('[SYSTEM] BYBIT готов. Работаем.')
+                ready['bybit'] = True
+            elif not ready['bybit']:
+                print('[SYSTEM] BYBIT ещё не готов. Ждём...')
 
             await asyncio.sleep(3)
 
@@ -169,7 +172,6 @@ class Controller:
         return fundings_dict
 
     def get_uncorrelations(self, main_dict):
-        main_list = []
         symbol_dict = {}
         for symbol, stocks in main_dict.items():
             stock_name1, stock_name2 = list(stocks.keys())

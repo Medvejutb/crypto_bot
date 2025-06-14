@@ -4,7 +4,6 @@ import aiohttp
 import websockets
 import requests
 import json
-from pprint import pprint
 
 class WS_binance:
     def __init__(self):

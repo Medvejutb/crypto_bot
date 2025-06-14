@@ -24,7 +24,7 @@ def get_human_time(future):
 
     return f"{days}д {hours}ч {minutes}м"
 
-def join_stocks_to_dict(stock1, stock2, stock3=None, stock4=None):
+def join_stocks_to_dict(stock1, stock2):
     data_coins = {}
     stock_name1 = stock1['stock']
     stock_name2 = stock2['stock']
