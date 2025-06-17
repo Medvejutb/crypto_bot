@@ -1,9 +1,13 @@
-BOT_TOKEN = '7858814635:AAGa6pJYQs0-WE-pkOX9gZDQcVuhKPk5zIk'
+BOT_TOKEN = 'токен'
+
+CHAT_ID = 00000000
 
 THRESHOLD = 0.5  # Порог раскорреляции в %
 
-EXCHANGES = ['binance', 'okx', 'bybit', 'bitget', 'GATE']
+SPREAD = 0.5 # Порог разницы прайсов одного фьючерса с разных бирж
 
-CHECK_INTERVAL = 60
+EXCHANGES = ['binance', 'okx', 'bybit', 'bitget', 'gate']
+
+CHECK_INTERVAL = 20
 
 COMMON_QUOTE = 'USDT'
