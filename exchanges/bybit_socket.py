@@ -56,17 +56,35 @@ class WS_bybit:
                         message = json.loads(msg)
                         data = message.get('data', {})
                         if message.get('type') == 'snapshot':
-                            symbol = message['data']['symbol']
-                            funding = float(message['data']['fundingRate']) * 100
-                            price = float(message['data']['lastPrice'])
-                            time = int(message['ts'])
-                            next_funding_time = int(message['data']['nextFundingTime'])
+                            data = message.get('data', {})
+
+                            symbol = data.get('symbol')
+                            funding_raw = data.get('fundingRate')
+                            price_raw = data.get('lastPrice')
+                            next_funding_raw = data.get('nextFundingTime')
+                            timestamp = message.get('ts')
+
+                            if None in (symbol, funding_raw, price_raw, next_funding_raw, timestamp):
+                                print(
+                                    f"[BYBIT WARNING] Пропущен snapshot: не хватает данных. symbol={symbol}, funding={funding_raw}, price={price_raw}, next={next_funding_raw}, ts={timestamp}")
+                                continue  # хуярим дальше
+
+                            try:
+                                funding = float(funding_raw) * 100
+                                price = float(price_raw)
+                                next_funding_time = int(next_funding_raw)
+                                time = int(timestamp)
+                            except (ValueError, TypeError) as e:
+                                print(f"[BYBIT ERROR] Ошибка приведения типов в snapshot: {e}")
+                                continue
+
                             self.symbols_data[symbol] = {
                                 'price': price,
                                 'funding': funding,
                                 'next_funding_time': next_funding_time,
-                                'timestamp': time
+                                'time': time
                             }
+
                         elif message.get("type") == "delta":
                             symbol = data.get("symbol")
                             if not symbol:
@@ -96,10 +114,24 @@ class WS_bybit:
                                 except:
                                     pass
                             if updated:
-                                self.symbols_data[symbol]['timestamp'] = int(message['ts'])
+                                self.symbols_data[symbol]['time'] = int(message['ts'])
             except Exception as error:
                 print(f'[BYBIT ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
+
+    async def get_funding_4_cur_symbols(self, symbols_list):
+        funding_dict = {}
+
+        for symbol_from_list in symbols_list:
+            if symbol_from_list in self.symbols_data:
+                funding = self.symbols_data[symbol_from_list]['funding']
+                next_funding_time = self.symbols_data[symbol_from_list]['next_funding_time']
+                funding_dict[symbol_from_list] = {
+                    'funding': funding,
+                    'next_funding_time': next_funding_time,
+                }
+
+        return funding_dict
 
     def check_ready(self) -> bool:
         if len(self.symbols_data) <= 30:

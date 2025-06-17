@@ -1,8 +1,10 @@
-BOT_TOKEN = '7858814635:AAGa6pJYQs0-WE-pkOX9gZDQcVuhKPk5zIk'
+BOT_TOKEN = 'токен'
+
+CHAT_ID = 00000000
 
 THRESHOLD = 0.5  # Порог раскорреляции в %
 
-SPREAD = 1 # Порог разницы прайсов одного фьючерса с разных бирж
+SPREAD = 0.5 # Порог разницы прайсов одного фьючерса с разных бирж
 
 EXCHANGES = ['binance', 'okx', 'bybit', 'bitget', 'gate']
 

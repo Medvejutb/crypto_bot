@@ -22,7 +22,11 @@ class WS_okx:
 
         while True:
             try:
-                async with websockets.connect(self.url_4_prices) as websocket:
+                async with websockets.connect(
+                        self.url_4_prices,
+                        ping_interval=25,
+                        ping_timeout = 10
+                ) as websocket:
                     self.connection = True
                     for i in range(0, len(self.instId_list), 30):
                         chunk = self.instId_list[i:i + 30]

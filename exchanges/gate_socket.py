@@ -6,8 +6,10 @@
 import asyncio
 import websockets
 import json
+from pathlib import Path
 import os
 import aiohttp
+import time as pytime
 
 from pprint import pprint
 
@@ -17,72 +19,78 @@ class WS_gate:
         self.symbols_data = {'stock': 'gate'}
         self.ready = False
         self.url_4_price_funding = 'wss://fx-ws.gate.io/v4/ws/usdt'
-        self.url_4_symbols = 'https://api.gate.io/api/v4/futures/usdt/contracts'
+        # Тупое нерабочее говно (сам АПИ) -- self.url_4_symbols = 'https://api.gate.io/api/v4/futures/usdt/contracts'
+        self.url_4_price = 'wss://fx-ws.gateio.ws/v4/ws/usdt'
         self.connection = False
 
-    async def get_symbols(self):
-        while True:
-            try:
-                print('[GATE] Сбор символов REST API')
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(self.url_4_symbols) as response:
-                        data = await response.json()
-                        self.symbols = [item['name'] for item in data if 'USDT' in item.get('name', '')]
-                return
-            except Exception as error:
-                print(f'[GATE ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
-                await asyncio.sleep(5)
+    def get_symbols(self):
+        print('[GATE] Сбор символов REST API')
+        json_path = Path(__file__).resolve().parent.parent / 'exchanges' / 'binance_symbols.json'
+        with open(json_path, 'r') as file:
+            self.symbols = ['_'.join([symbol.split('USDT')[0], 'USDT']) for symbol in json.load(file)]
+
+
 
     async def start_socket(self):
-        await self.get_symbols()
-        subscribe_settings = {
-              "time": 1234567890,
-              "channel": "futures.tickers",
-              "event": "subscribe",
-              "payload": self.symbols,
-              "id": 1337
-            }
+        self.get_symbols()
 
         while True:
             try:
-                async with websockets.connect(self.url_4_price_funding) as websocket:
+                async with websockets.connect(self.url_4_price) as websocket:
                     self.connection = True
                     print('[GATE SYSTEM] Соединение установлено')
-                    await websocket.send(json.dumps(subscribe_settings))
+                    for i in range(0, len(self.symbols), 30):
+                        chunk = self.symbols[i:i + 30]
+                        subscribe_settings = {
+                            "id": int(pytime.time() * 1000) + i,  # уникальный id на каждый чанк
+                            "time": int(pytime.time()),  # текущее время
+                            "channel": "futures.tickers",
+                            "event": "subscribe",
+                            "payload": chunk
+                        }
+                        await websocket.send(json.dumps(subscribe_settings))
+                        await asyncio.sleep(0.1)
                     print('[GATE SOCKET] Подписка отправлена')
 
                     while True:
                         msg = await websocket.recv()
                         message = json.loads(msg)
-                        pprint(message)
-                        if message.get("channel") == "futures.tickers" and message.get("event") == "update":
-                            result = message.get("result", {})
-                            symbol = result.get("contract")
-                            if not symbol:
-                                continue
 
-                            try:
-                                price = float(result.get("last", 0))
-                                funding = float(result.get("funding_rate", 0)) * 100
-                                next_funding_time = int(result.get("next_funding_time", 0))
-                            except (ValueError, TypeError):
-                                continue
+                        if message.get('event') == 'subscribe':
+                            continue
+                        elif message.get('event') == 'update':
+                            result = message.get('result')
+                            data = result[0]
+
+                            symbol = data.get('contract')
+                            price = data.get('last')
+                            funding = data.get('funding_rate')
+                            next_funding_time = None
+                            time = None
 
                             self.symbols_data[symbol] = {
                                 'price': price,
                                 'funding': funding,
                                 'next_funding_time': next_funding_time,
-                                'timestamp': int(message['time']) * 1000
+                                'time': time
                             }
-                            pprint(self.symbols_data)
-                        await asyncio.sleep(1)
+
+
             except Exception as error:
                 print(f'[GATE ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
 
+    def check_ready(self) -> bool:
+        if len(self.symbols_data) <= 30:
+            return False
+        self.ready = True
+        return True
 
-async def main():
+    def get_prices_data(self):
+        return self.symbols_data
+
+"""async def main():
     suka = WS_gate()
     await suka.start_socket()
 
-asyncio.run(main())
+asyncio.run(main())"""

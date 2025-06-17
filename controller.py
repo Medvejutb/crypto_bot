@@ -3,6 +3,7 @@ from exchanges.binance_socket import WS_binance
 from exchanges.bitget_socket import WS_bitget
 from exchanges.okx import WS_okx
 from exchanges.bybit_socket import WS_bybit
+from exchanges.gate_socket import WS_gate
 from itertools import combinations
 from utils.math_operations import Calculator
 import config
@@ -13,7 +14,7 @@ class Controller:
         self.bitget = WS_bitget()
         self.okx = WS_okx()
         self.bybit = WS_bybit()
-        self.gate = None
+        self.gate = WS_gate()
         self.calculator = Calculator()
         self.stocks_dict = {}
         self.spreads = {}
@@ -21,7 +22,7 @@ class Controller:
             'binance': self.binance.get_funding_4_cur_symbols,
             'bitget': self.bitget.get_funding_4_cur_symbols,
             'okx': self.okx.get_funding_4_cur_symbols,
-            'bybit': None,
+            'bybit': self.bybit.get_funding_4_cur_symbols,
             'gate': None
         }
 
@@ -39,12 +40,16 @@ class Controller:
         print('[SYSTEM] Запускаем WebSocket BYBIT...')
         bybit_task = asyncio.create_task(self.bybit.start_socket())
 
+        print('[SYSTEM] Запускаем WebSocket GATE...')
+        gate_task = asyncio.create_task(self.gate.start_socket())
+
 
         ready = {
             'binance': False,
             'bitget': False,
             'okx': False,
-            'bybit': False
+            'bybit': False,
+            'gate': False
         }
 
         while not all(ready.values()):
@@ -72,6 +77,12 @@ class Controller:
             elif not ready['bybit']:
                 print('[SYSTEM] BYBIT ещё не готов. Ждём...')
 
+            if not ready['gate'] and self.gate.check_ready():
+                print('[SYSTEM] GATE готов. Работаем.')
+                ready['gate'] = True
+            elif not ready['gate']:
+                print('[SYSTEM] GATE ещё не готов. Ждём...')
+
             await asyncio.sleep(3)
 
     def _merge_exchange_data(self, data_list):
@@ -96,11 +107,15 @@ class Controller:
         binance_data = self.binance.get_prices_data()
         bitget_data = self.bitget.get_prices_data()
         okx_data = self.okx.get_prices_data()
+        bybit_data = self.bybit.get_prices_data()
+        gate_data = self.gate.get_prices_data()
 
         data_list = [
             binance_data,
             bitget_data,
             okx_data,
+            bybit_data,
+            gate_data
         ]
 
         self._merge_exchange_data(data_list)
@@ -146,7 +161,7 @@ class Controller:
         return self.stocks_dict
 
     async def get_fundings_for_symbols(self, symbols_dict):
-        fundings_dict = {}  # {'BTCUSDT': {'binance': 0.0001, 'okx': 0.0002}, ...}
+        fundings_dict = {}
 
         # Собираем все уникальные symbol'ы, которые есть в symbols_dict
         symbols_set = set(symbols_dict.keys())
@@ -184,3 +199,10 @@ class Controller:
                 symbol_dict[symbol] = uncorrelation
 
         return symbol_dict
+
+    def check_and_split_msg(self, msg):
+        if len(msg) > 10:
+            chunks = [msg[i:i + 10] for i in range(0, len(msg), 10)]
+            return chunks
+        else:
+            return [msg]

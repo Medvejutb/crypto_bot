@@ -1,6 +1,10 @@
 from datetime import datetime
 
 def smart_round(price: float) -> str:
+
+    if price is None:
+        return price
+
     if float(price) > 100:
         return f"{price:.0f}"
     elif float(price) > 1:

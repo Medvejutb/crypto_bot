@@ -39,13 +39,13 @@ async def background_worker():
                 ]))
 
             print(len(message_text))
+            message_text = ctrl.check_and_split_msg(message_text)
+            for text in message_text:
+                text = '\n'.join(text)
 
-            message_text = '\n'.join(message_text)
+                await bot.send_message(config.CHAT_ID, text)
 
-
-            await bot.send_message(5608629096, message_text)
-
-            await bot.send_message(5608629096, '====================')
+            await bot.send_message(config.CHAT_ID, '==========КОНЕЦ СООБЩЕНИЯ==========')
 
             await asyncio.sleep(config.CHECK_INTERVAL)
         else:
