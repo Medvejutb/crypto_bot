@@ -9,19 +9,21 @@ class WS_bitget:
         self.symbols = []
         self.data = {'stock': 'bitget'}
         self.ready = False
-        self.url_4_prices = 'wss://ws.bitget.com/mix/v1/stream'
-        self.url_4_symbols = 'https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES'
+        self.url_4_prices = 'wss://ws.bitget.com/v2/ws/public'
+        self.url_4_symbols = "https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES"
         self.url_4_symbols_next_funding = 'https://api.bitget.com/api/v2/mix/market/funding-time?symbol='
         self.connection = False
 
 
     async def start_socket(self):
         await self.get_symbols()
+        print('[BITGET DEBUG] Symbols for subscription:', self.symbols)
+
         subscribe_settings = {
             "op": "subscribe",
             "args": [
                 {
-                    "instType": "mc",
+                    "instType": "USDT-FUTURES",
                     "channel": "ticker",
                     "instId": symbol
                 } for symbol in self.symbols
@@ -39,7 +41,7 @@ class WS_bitget:
                     print('[BITGET SYSTEM] Соединение установлено')
 
                     # Врубаем ручной пинг
-                    ping_task = asyncio.create_task(self.manual_ping(websocket))
+                    #ping_task = asyncio.create_task(self.manual_ping(websocket))
 
                     await websocket.send(json.dumps(subscribe_settings))
                     print('[BITGET SOCKET] Подписка отправлена')
@@ -47,31 +49,50 @@ class WS_bitget:
                     while True:
                         msg = await websocket.recv()
                         message = json.loads(msg)
-                        await asyncio.sleep(1)
+                        if message.get('event') == 'subscribe':
+                            continue
+                        if message.get('action') == 'snapshot':
+                            data = message.get('data')[0]
+
+                            symbol = data.get('instId')
+                            last_price = data.get('lastPr')
+                            funding = data.get('fundingRate')
+                            next_funding_time = data.get('nextFundingTime')
+                            time = data.get('ts')
+
+                            self.data[symbol] = {
+                                'price': last_price,
+                                'funding': float(funding) * 100,
+                                'next_funding_time': next_funding_time,
+                                'time': time
+                            }
+
+
 
             except Exception as error:
                 print(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
-            finally:
+            """finally:
                 try:
                     ping_task.cancel()
                 except:
-                    pass
+                    pass"""
 
 
-    async def manual_ping(self, websocket):
-        while True:
-            try:
-                await websocket.send(json.dumps({"op": "ping"}))  # Bitget требует именно такой формат
-                await asyncio.sleep(15)  # интервал можно настроить, 15 сек — норм
-            except Exception as e:
-                print(f'[BITGET PING] Ошибка при отправке ping: {e}')
-                break  # выйдем из пинга, чтобы основной цикл словил reconnection
+    """    async def manual_ping(self, websocket):
+            while True:
+                try:
+                    await websocket.send(json.dumps({"op": "ping"}))  # Bitget требует именно такой формат
+                    await asyncio.sleep(15)  # интервал можно настроить, 15 сек — норм
+                except Exception as e:
+                    print(f'[BITGET PING] Ошибка при отправке ping: {e}')
+                    break  # выйдем из пинга, чтобы основной цикл словил reconnection
+    """
 
     async def get_symbols(self):
         while True:
             try:
-                print('[BITGET] Сбор символов REST API')
+                print('[BITGET] Сбор символов из REST API')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_symbols) as response:
                         data = await response.json()
@@ -80,24 +101,14 @@ class WS_bitget:
 
                         for item in data['data']:
                             symbol = item.get('symbol')
-                            if float(item.get('lastPr')) > 0:
-                                price = item.get('lastPr')
-                            else:
-                                continue
-                            funding = float(item.get('fundingRate')) * 100
-                            time = item.get('ts')
-                            next_funding_time = None
+                            last_price = item.get('lastPr')
 
-                            self.symbols.append(symbol)
-                            self.data[symbol] = {
-                                'price': price,
-                                'funding': funding,
-                                'next_funding_time': next_funding_time,
-                                'time': time
-                            }
+                            if symbol and last_price and float(last_price) > 0:
+                                self.symbols.append(symbol)
+
                 return
             except Exception as error:
-                print(f'[BITGET ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
+                print(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 5 сек')
                 await asyncio.sleep(5)
 
     def check_ready(self) -> bool:
@@ -150,6 +161,6 @@ class WS_bitget:
 
 """async def main():
     suka = WS_bitget()
-    await suka.get_next_funding('BTCUSDT')
+    await suka.start_socket()
 
 asyncio.run(main())"""
