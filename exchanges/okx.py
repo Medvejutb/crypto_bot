@@ -1,10 +1,10 @@
-import requests
 import websockets
 import asyncio
 import aiohttp
 import json
-from pprint import pprint
+from utils.views import Logging_manager
 
+logger = Logging_manager.get_logger()
 
 class WS_okx:
     def __init__(self):
@@ -41,7 +41,7 @@ class WS_okx:
                         }
                         await websocket.send(json.dumps(subscribe_settings))
                         await asyncio.sleep(0.1)
-                    print('[OKX SOCKET] Подписка отправлена')
+                    logger.debug('[OKX SOCKET] Подписка отправлена')
 
                     while True:
                         msg = await websocket.recv()
@@ -58,7 +58,7 @@ class WS_okx:
 
 
             except Exception as error:
-                print(f'[OKX ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
+                logger.error(f'[OKX ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
 
 
@@ -69,7 +69,7 @@ class WS_okx:
         self.symbols = []
         while True:
             try:
-                print('[OKX] Сбор символов REST API')
+                logger.debug('[OKX] Сбор символов REST API')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_symbols) as response:
 
@@ -98,7 +98,7 @@ class WS_okx:
                         return
 
             except Exception as error:
-                print(f'[OKX ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
+                logger.error(f'[OKX ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
                 await asyncio.sleep(5)
 
     def check_ready(self) -> bool:
@@ -113,7 +113,7 @@ class WS_okx:
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
         while True:
             try:
-                print('[OKX SYSTEM] Сбор фандингов')
+                logger.debug('[OKX SYSTEM] Сбор фандингов')
                 async with aiohttp.ClientSession() as session:
 
                     funding_dict = {}
@@ -139,4 +139,4 @@ class WS_okx:
 
                     return funding_dict
             except Exception as error:
-                print(f'[OKX ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}\n{symbol}')
+                logger.error(f'[OKX ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}\n{symbol}')

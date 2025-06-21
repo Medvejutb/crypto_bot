@@ -2,7 +2,9 @@ import asyncio
 import aiohttp
 import websockets
 import json
-from pprint import pprint
+from utils.views import Logging_manager
+
+logger = Logging_manager.get_logger()
 
 class WS_bitget:
     def __init__(self):
@@ -17,7 +19,6 @@ class WS_bitget:
 
     async def start_socket(self):
         await self.get_symbols()
-        print('[BITGET DEBUG] Symbols for subscription:', self.symbols)
 
         subscribe_settings = {
             "op": "subscribe",
@@ -38,13 +39,10 @@ class WS_bitget:
                         close_timeout=5
                 ) as websocket:
                     self.connection = True
-                    print('[BITGET SYSTEM] Соединение установлено')
-
-                    # Врубаем ручной пинг
-                    #ping_task = asyncio.create_task(self.manual_ping(websocket))
+                    logger.debug('[BITGET SYSTEM] Соединение установлено')
 
                     await websocket.send(json.dumps(subscribe_settings))
-                    print('[BITGET SOCKET] Подписка отправлена')
+                    logger.debug('[BITGET SOCKET] Подписка отправлена')
 
                     while True:
                         msg = await websocket.recv()
@@ -66,33 +64,14 @@ class WS_bitget:
                                 'next_funding_time': next_funding_time,
                                 'time': time
                             }
-
-
-
             except Exception as error:
-                print(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
+                logger.error(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
-            """finally:
-                try:
-                    ping_task.cancel()
-                except:
-                    pass"""
-
-
-    """    async def manual_ping(self, websocket):
-            while True:
-                try:
-                    await websocket.send(json.dumps({"op": "ping"}))  # Bitget требует именно такой формат
-                    await asyncio.sleep(15)  # интервал можно настроить, 15 сек — норм
-                except Exception as e:
-                    print(f'[BITGET PING] Ошибка при отправке ping: {e}')
-                    break  # выйдем из пинга, чтобы основной цикл словил reconnection
-    """
 
     async def get_symbols(self):
         while True:
             try:
-                print('[BITGET] Сбор символов из REST API')
+                logger.debug('[BITGET] Сбор символов из REST API')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_symbols) as response:
                         data = await response.json()
@@ -108,7 +87,7 @@ class WS_bitget:
 
                 return
             except Exception as error:
-                print(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 5 сек')
+                logger.error(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 5 сек')
                 await asyncio.sleep(5)
 
     def check_ready(self) -> bool:
@@ -123,7 +102,7 @@ class WS_bitget:
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
         while True:
             try:
-                print('[BITGET SYSTEM] Сбор фандингов')
+                logger.debug('[BITGET SYSTEM] Сбор фандингов')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_symbols) as response:
                         data = await response.json()
@@ -142,7 +121,7 @@ class WS_bitget:
                                 }
                         return funding_dict
             except Exception as error:
-                print(f'[BITGET ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
+                logger.error(f'[BITGET ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
 
     async def get_next_funding(self, symbol) -> int:
         url = f'https://api.bitget.com/api/v2/mix/market/funding-time?symbol={symbol}&productType=usdt-futures'
@@ -154,7 +133,7 @@ class WS_bitget:
                         data = data['data'][0]
                         return data['nextFundingTime']
             except Exception as error:
-                print(f'[BITGET ERROR] Произошла ошибка при сборе фандинга - {error}. Через 5 сек заново')
+                logger.error(f'[BITGET ERROR] Произошла ошибка при сборе фандинга - {error}. Через 5 сек заново')
                 await asyncio.sleep(5)
 
 

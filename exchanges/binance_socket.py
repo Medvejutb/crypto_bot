@@ -4,6 +4,9 @@ import aiohttp
 import websockets
 import requests
 import json
+from utils.views import Logging_manager
+
+logger = Logging_manager.get_logger()
 
 class WS_binance:
     def __init__(self):
@@ -27,7 +30,7 @@ class WS_binance:
             try:
                 async with websockets.connect(self.url_4_prices) as websocket:
                     self.connection = True
-                    print('[BINANCE SYSTEM] Соединение уставнолено')
+                    logger.debug('[BINANCE SYSTEM] Соединение уставнолено')
                     while True:
                         msg = await websocket.recv()
                         message = json.loads(msg)
@@ -40,7 +43,7 @@ class WS_binance:
                         }
             except Exception as error:
                 self.connection = False
-                print(f'[BINANCE SYSTEM] Ошибка в сокете: {error}. Переподключаюсь через 5 секунд...')
+                logger.error(f'[BINANCE SYSTEM] Ошибка в сокете: {error}. Переподключаюсь через 5 секунд...')
                 await asyncio.sleep(5)
 
     def check_ready(self) -> bool:
@@ -64,7 +67,7 @@ class WS_binance:
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
         while True:
             try:
-                print('[BINANCE SYSTEM] Сбор фандингов')
+                logger.debug('[BINANCE SYSTEM] Сбор фандингов')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_fundings) as response:
                         data = await response.json()
@@ -79,14 +82,11 @@ class WS_binance:
                                 }
                         return funding_dict
             except Exception as error:
-                print(f'[BINANCE ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
+                logger.error(f'[BINANCE ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
 
 
 
 def get_coins_with_status_TRADING() -> list:
-    '''
-    Эта хуйня для парса тупо названий активов перпетуалок с токеном USDT
-    '''
     url_4_symbol = 'https://fapi.binance.com/fapi/v1/exchangeInfo'
     response = requests.get(url_4_symbol)
     data = response.json()

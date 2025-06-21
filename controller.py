@@ -6,7 +6,11 @@ from exchanges.bybit_socket import WS_bybit
 from exchanges.gate_socket import WS_gate
 from itertools import combinations
 from utils.math_operations import Calculator
+from utils.views import Logging_manager
 import config
+
+
+logger = Logging_manager.get_logger()
 
 class Controller:
     def __init__(self):
@@ -28,19 +32,19 @@ class Controller:
 
 
     async def start_all_sockets(self):
-        print('[SYSTEM] Запускаем WebSocket Binance...')
+        logger.debug('[SYSTEM] Запускаем WebSocket Binance...')
         binance_task = asyncio.create_task(self.binance.start_socket())
 
-        print('[SYSTEM] Запускаем WebSocket Bitget...')
+        logger.debug('[SYSTEM] Запускаем WebSocket Bitget...')
         bitget_task = asyncio.create_task(self.bitget.start_socket())
 
-        print('[SYSTEM] Запускаем WebSocket OKX...')
+        logger.debug('[SYSTEM] Запускаем WebSocket OKX...')
         okx_task = asyncio.create_task(self.okx.start_socket())
 
-        print('[SYSTEM] Запускаем WebSocket BYBIT...')
+        logger.debug('[SYSTEM] Запускаем WebSocket BYBIT...')
         bybit_task = asyncio.create_task(self.bybit.start_socket())
 
-        print('[SYSTEM] Запускаем WebSocket GATE...')
+        logger.debug('[SYSTEM] Запускаем WebSocket GATE...')
         gate_task = asyncio.create_task(self.gate.start_socket())
 
 
@@ -54,34 +58,34 @@ class Controller:
 
         while not all(ready.values()):
             if not ready['binance'] and self.binance.check_ready():
-                print('[SYSTEM] Binance готов. Работаем.')
+                logger.debug('[SYSTEM] Binance готов. Работаем.')
                 ready['binance'] = True
             elif not ready['binance']:
-                print('[SYSTEM] Binance ещё не готов. Ждём...')
+                logger.debug('[SYSTEM] Binance ещё не готов. Ждём...')
 
             if not ready['bitget'] and self.bitget.check_ready():
-                print('[SYSTEM] Bitget готов. Работаем.')
+                logger.debug('[SYSTEM] Bitget готов. Работаем.')
                 ready['bitget'] = True
             elif not ready['bitget']:
-                print('[SYSTEM] Bitget ещё не готов. Ждём...')
+                logger.debug('[SYSTEM] Bitget ещё не готов. Ждём...')
 
             if not ready['okx'] and self.okx.check_ready():
-                print('[SYSTEM] OKX готов. Работаем.')
+                logger.debug('[SYSTEM] OKX готов. Работаем.')
                 ready['okx'] = True
             elif not ready['okx']:
-                print('[SYSTEM] OKX ещё не готов. Ждём...')
+                logger.debug('[SYSTEM] OKX ещё не готов. Ждём...')
 
             if not ready['bybit'] and self.bybit.check_ready():
-                print('[SYSTEM] BYBIT готов. Работаем.')
+                logger.debug('[SYSTEM] BYBIT готов. Работаем.')
                 ready['bybit'] = True
             elif not ready['bybit']:
-                print('[SYSTEM] BYBIT ещё не готов. Ждём...')
+                logger.debug('[SYSTEM] BYBIT ещё не готов. Ждём...')
 
             if not ready['gate'] and self.gate.check_ready():
-                print('[SYSTEM] GATE готов. Работаем.')
+                logger.debug('[SYSTEM] GATE готов. Работаем.')
                 ready['gate'] = True
             elif not ready['gate']:
-                print('[SYSTEM] GATE ещё не готов. Ждём...')
+                logger.debug('[SYSTEM] GATE ещё не готов. Ждём...')
 
             await asyncio.sleep(3)
 
@@ -172,7 +176,6 @@ class Controller:
                 continue
 
             try:
-                print('[SYSTEM] Сбор фандингов')
                 stock_funding_data = await func(list(symbols_set))
                 # Ожидаем, что вернёт {'BTCUSDT': 0.0001, 'ETHUSDT': 0.0002, ...}
 
@@ -182,7 +185,7 @@ class Controller:
                     fundings_dict[symbol][stock_name] = funding
 
             except Exception as e:
-                print(f'[FUNDING ERROR] {stock_name} сдохла: {e}')
+                logger.error(f'[FUNDING ERROR] {stock_name} сдохла: {e}')
 
         return fundings_dict
 

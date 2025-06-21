@@ -5,10 +5,11 @@ from controller import Controller
 import config
 from utils.normalization import join_stocks_dicts_to_main_stocks_dict
 from utils.normalization import smart_round
+from utils.views import Logging_manager
 
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
-
+logger = Logging_manager.get_logger()
 ctrl = Controller()
 
 @dp.message()
@@ -16,14 +17,19 @@ async def get_id(message: Message):
     await message.answer(f"Твой айди\n{message.from_user.id}")
 
 async def background_worker():
+    logger.success('[SYSTEM] Запуск сокетов...')
     await ctrl.start_all_sockets()
     while True:
+        logger.success('[SYSTEM] Обработка данных')
         symbols_prices = ctrl.get_needed_symbols_with_prices()
+
+        logger.success('[SYSTEM] Сбор фандингов')
         symbols_fundings = await ctrl.get_fundings_for_symbols(symbols_prices)
+
         main_dict = join_stocks_dicts_to_main_stocks_dict(symbols_prices, symbols_fundings)
         uncorrelations = ctrl.get_uncorrelations(main_dict)
         if uncorrelations:
-            print('====================СООБЩЕНИЕ БОТА=====================')
+            logger.success('=======СООБЩЕНИЕ БОТА========')
             message_dict = uncorrelations
 
             message_text = []
@@ -38,7 +44,6 @@ async def background_worker():
                     f"__________________________"
                 ]))
 
-            print(len(message_text))
             message_text = ctrl.check_and_split_msg(message_text)
             for text in message_text:
                 text = '\n'.join(text)
@@ -49,7 +54,7 @@ async def background_worker():
 
             await asyncio.sleep(config.CHECK_INTERVAL)
         else:
-            print('====================СООБЩЕНИЕ БОТА ПУСТОЕ=====================')
+            logger.info('====================СООБЩЕНИЕ БОТА ПУСТОЕ=====================')
             await asyncio.sleep(5)
 
 async def main():

@@ -1,10 +1,10 @@
 import asyncio
 import websockets
 import json
-import os
 import aiohttp
+from utils.views import Logging_manager
 
-from pprint import pprint
+logger = Logging_manager.get_logger()
 
 class WS_bybit:
     def __init__(self):
@@ -19,7 +19,7 @@ class WS_bybit:
         self.symbols = []
         while True:
             try:
-                print('[BYBIT] Сбор символов REST API')
+                logger.debug('[BYBIT] Сбор символов REST API')
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.url_4_symbols) as response:
 
@@ -31,7 +31,7 @@ class WS_bybit:
                                         self.symbols.append(item.get('symbol'))
                         return
             except Exception as error:
-                print(f'[BYBIT ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
+                logger.error(f'[BYBIT ERROR] Произошла ошибка при сборе символов - {error}. Через 5 сек заново')
                 await asyncio.sleep(5)
 
     async def start_socket(self):
@@ -49,7 +49,7 @@ class WS_bybit:
                         }
                         await websocket.send(json.dumps(subscribe_settings))
                         await asyncio.sleep(0.1)
-                    print('[BYBIT SOCKET] Подписка отправлена')
+                    logger.debug('[BYBIT SOCKET] Подписка отправлена')
 
                     while True:
                         msg = await websocket.recv()
@@ -65,8 +65,9 @@ class WS_bybit:
                             timestamp = message.get('ts')
 
                             if None in (symbol, funding_raw, price_raw, next_funding_raw, timestamp):
-                                print(
-                                    f"[BYBIT WARNING] Пропущен snapshot: не хватает данных. symbol={symbol}, funding={funding_raw}, price={price_raw}, next={next_funding_raw}, ts={timestamp}")
+                                logger.debug(
+                                    f"[BYBIT WARNING] Пропущен snapshot: не хватает данных. symbol={symbol},"
+                                    f" funding={funding_raw}, price={price_raw}, next={next_funding_raw}, ts={timestamp}")
                                 continue  # хуярим дальше
 
                             try:
@@ -75,7 +76,7 @@ class WS_bybit:
                                 next_funding_time = int(next_funding_raw)
                                 time = int(timestamp)
                             except (ValueError, TypeError) as e:
-                                print(f"[BYBIT ERROR] Ошибка приведения типов в snapshot: {e}")
+                                logger.error(f"[BYBIT ERROR] Ошибка приведения типов в snapshot: {e}")
                                 continue
 
                             self.symbols_data[symbol] = {
@@ -116,7 +117,7 @@ class WS_bybit:
                             if updated:
                                 self.symbols_data[symbol]['time'] = int(message['ts'])
             except Exception as error:
-                print(f'[BYBIT ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
+                logger.error(f'[BYBIT ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
 
     async def get_funding_4_cur_symbols(self, symbols_list):

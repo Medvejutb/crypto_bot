@@ -1,17 +1,11 @@
-"""
-Сервак АПИ гейта не работает, разработка приостановлена
-"""
-
-
 import asyncio
 import websockets
 import json
 from pathlib import Path
-import os
-import aiohttp
 import time as pytime
+from utils.views import Logging_manager
 
-from pprint import pprint
+logger = Logging_manager.get_logger()
 
 class WS_gate:
     def __init__(self):
@@ -19,12 +13,11 @@ class WS_gate:
         self.symbols_data = {'stock': 'gate'}
         self.ready = False
         self.url_4_price_funding = 'wss://fx-ws.gate.io/v4/ws/usdt'
-        # Тупое нерабочее говно (сам АПИ) -- self.url_4_symbols = 'https://api.gate.io/api/v4/futures/usdt/contracts'
         self.url_4_price = 'wss://fx-ws.gateio.ws/v4/ws/usdt'
         self.connection = False
 
     def get_symbols(self):
-        print('[GATE] Сбор символов REST API')
+        logger.debug('[GATE] Сбор символов REST API')
         json_path = Path(__file__).resolve().parent.parent / 'exchanges' / 'binance_symbols.json'
         with open(json_path, 'r') as file:
             self.symbols = ['_'.join([symbol.split('USDT')[0], 'USDT']) for symbol in json.load(file)]
@@ -38,7 +31,7 @@ class WS_gate:
             try:
                 async with websockets.connect(self.url_4_price) as websocket:
                     self.connection = True
-                    print('[GATE SYSTEM] Соединение установлено')
+                    logger.debug('[GATE SYSTEM] Соединение установлено')
                     for i in range(0, len(self.symbols), 30):
                         chunk = self.symbols[i:i + 30]
                         subscribe_settings = {
@@ -50,7 +43,7 @@ class WS_gate:
                         }
                         await websocket.send(json.dumps(subscribe_settings))
                         await asyncio.sleep(0.1)
-                    print('[GATE SOCKET] Подписка отправлена')
+                    logger.debug('[GATE SOCKET] Подписка отправлена')
 
                     while True:
                         msg = await websocket.recv()
@@ -77,7 +70,7 @@ class WS_gate:
 
 
             except Exception as error:
-                print(f'[GATE ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
+                logger.error(f'[GATE ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
                 await asyncio.sleep(5)
 
     def check_ready(self) -> bool:
