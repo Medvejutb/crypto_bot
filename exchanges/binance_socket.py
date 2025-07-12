@@ -5,7 +5,9 @@ import websockets
 import requests
 import json
 from utils.views import Logging_manager
+from cache_manager import Cache_manager
 
+cache_manager = Cache_manager()
 logger = Logging_manager.get_logger()
 
 class WS_binance:
@@ -65,25 +67,46 @@ class WS_binance:
         pass
 
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
+        logger.debug('[BINANCE SYSTEM] Сбор фандингов')
         while True:
-            try:
-                logger.debug('[BINANCE SYSTEM] Сбор фандингов')
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(self.url_4_fundings) as response:
-                        data = await response.json()
+            funding_dict = {}
 
-                        funding_dict = {}
+            missing_symbols = [symbol for symbol in symbols_list if cache_manager.get_symbol_funding_data(symbol, 'binance') is None or cache_manager.is_funding_expired(symbol, 'binance')]
 
-                        for item in data:
-                            if item.get('symbol') in symbols_list:
-                                funding_dict[item.get('symbol')] = {
-                                    'funding': float(item.get('lastFundingRate', 0)) * 100,
-                                    'next_funding_time': int(item.get('nextFundingTime', 0))
-                                }
-                        return funding_dict
-            except Exception as error:
-                logger.error(f'[BINANCE ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
+            if missing_symbols:
 
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        
+                        async with session.get(self.url_4_fundings) as response:
+                            data = await response.json()
+
+                            for item in data:
+                                symbol = item.get('symbol')
+                                if symbol in missing_symbols:
+                                    
+                                    logger.debug('=====================REST API BINANCE')
+                                    funding = float(item.get('lastFundingRate', 0)) * 100
+                                    next_funding_time = int(item.get('nextFundingTime', 0))
+
+                                    cache_manager.set_symbol_data(
+                                        symbol=symbol,
+                                        stock='binance',
+                                        funding=funding,
+                                        next_time=next_funding_time,
+                                    )
+
+                except Exception as error:
+                    logger.error(f'[BINANCE ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
+        
+            for symbol in symbols_list:
+                cached = cache_manager.get_symbol_funding_data(symbol, 'binance')
+                if cached:
+                    funding_dict[symbol] = {
+                        'funding': float(cached.get('funding')),
+                        'next_funding_time': int(cached.get('next_time')),
+                        }
+            return funding_dict
 
 
 def get_coins_with_status_TRADING() -> list:

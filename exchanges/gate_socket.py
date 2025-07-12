@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import time as pytime
 from utils.views import Logging_manager
+from cache_manager import Cache_manager
 
+cache_manager = Cache_manager()
 logger = Logging_manager.get_logger()
 
 class WS_gate:

@@ -3,7 +3,9 @@ import asyncio
 import aiohttp
 import json
 from utils.views import Logging_manager
+from cache_manager import Cache_manager
 
+cache_manager = Cache_manager()
 logger = Logging_manager.get_logger()
 
 class WS_okx:
@@ -111,32 +113,47 @@ class WS_okx:
         return self.data
 
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
+        logger.debug('[OKX SYSTEM] Сбор фандингов')
         while True:
-            try:
-                logger.debug('[OKX SYSTEM] Сбор фандингов')
-                async with aiohttp.ClientSession() as session:
 
-                    funding_dict = {}
+            missing_symbols = [symbol for symbol in symbols_list if cache_manager.get_symbol_funding_data(symbol, 'okx') is None or cache_manager.is_funding_expired(symbol, 'okx')]
+            funding_dict = {}
 
-                    for symbol in symbols_list:
+            if missing_symbols:
+                
+                try:
+                    async with aiohttp.ClientSession() as session:
 
-                        instId = symbol.removesuffix('USDT')+'-USDT-SWAP'
-                        url = self.url_4_fundings+instId
-                        async with session.get(url) as response:
+                        for symbol in missing_symbols:
+                            
+                            instId = symbol.removesuffix('USDT')+'-USDT-SWAP'
+                            url = self.url_4_fundings+instId
+                            async with session.get(url) as response:
 
-                            data = await response.json()
+                                data = await response.json()
 
-                            if not data.get('data') or not data.get('code') == '0':
-                                continue
+                                if not data.get('data') or not data.get('code') == '0':
+                                    continue
+                                
+                                logger.debug('=================REST API OKX')
+                                funding = float(data['data'][0].get('fundingRate')) * 100
+                                next_funding_time = int(data['data'][0].get('nextFundingTime'))
 
-                            funding = float(data['data'][0].get('fundingRate')) * 100
-                            next_funding_time = int(data['data'][0].get('nextFundingTime'))
+                                cache_manager.set_symbol_data(
+                                    symbol=symbol,
+                                    stock='okx',
+                                    funding=funding,
+                                    next_time=next_funding_time,
+                                )
 
-                            funding_dict[symbol] = {
-                                'funding': funding,
-                                'next_funding_time': next_funding_time,
-                            }
-
-                    return funding_dict
-            except Exception as error:
-                logger.error(f'[OKX ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}\n{symbol}')
+                except Exception as error:
+                    logger.error(f'[OKX ERROR] Произошла ошибка при сборе фандингов c REST API для {symbol}\nОшибка - {error}')
+            
+            for symbol in symbols_list:
+                cached = cache_manager.get_symbol_funding_data(symbol, 'okx')
+                if  cached:
+                    funding_dict[symbol] = {
+                        'funding': cached.get('funding'),
+                        'next_funding_time': cached.get('next_time'),
+                        }
+            return funding_dict

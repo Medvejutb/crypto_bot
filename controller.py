@@ -9,7 +9,6 @@ from utils.math_operations import Calculator
 from utils.views import Logging_manager
 import config
 
-
 logger = Logging_manager.get_logger()
 
 class Controller:
@@ -88,6 +87,7 @@ class Controller:
                 logger.debug('[SYSTEM] GATE ещё не готов. Ждём...')
 
             await asyncio.sleep(3)
+        logger.success('[SYSTEM] Биржи все биржи готовы')
 
     def _merge_exchange_data(self, data_list):
         self.stocks_dict = {}
@@ -123,6 +123,10 @@ class Controller:
         ]
 
         self._merge_exchange_data(data_list)
+
+        # for symbol, stocks in self.stocks_dict.items():# В этом цикле постоянно добавляются в кэш новые символы с разных бирж без данных
+        #     for stock, data in stocks.items():
+        #         cache_manager.add_symbol_funding_para(symbol, stock)
 
         for symbol, stocks in self.stocks_dict.items():
             stocks_data = list(stocks.keys())

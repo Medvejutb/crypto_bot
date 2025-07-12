@@ -3,7 +3,9 @@ import aiohttp
 import websockets
 import json
 from utils.views import Logging_manager
+from cache_manager import Cache_manager
 
+cache_manager = Cache_manager()
 logger = Logging_manager.get_logger()
 
 class WS_bitget:
@@ -16,6 +18,14 @@ class WS_bitget:
         self.url_4_symbols_next_funding = 'https://api.bitget.com/api/v2/mix/market/funding-time?symbol='
         self.connection = False
 
+    async def ping_loop(self, websocket):
+        while True:
+            try:
+                await websocket.send(json.dumps({"op": "ping"}))
+                await asyncio.sleep(20)
+            except Exception as e:
+                logger.error(f"[BITGET PING ERROR] {e}")
+                return
 
     async def start_socket(self):
         await self.get_symbols()
@@ -35,9 +45,12 @@ class WS_bitget:
             try:
                 async with websockets.connect(
                         self.url_4_prices,
-                        ping_interval=None,  # отключаем автоматический
+                        ping_interval=None,
                         close_timeout=5
                 ) as websocket:
+                    
+                    ping_task = asyncio.create_task(self.ping_loop(websocket))
+
                     self.connection = True
                     logger.debug('[BITGET SYSTEM] Соединение установлено')
 
@@ -65,8 +78,10 @@ class WS_bitget:
                                 'time': time
                             }
             except Exception as error:
-                logger.error(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 5 секунд')
-                await asyncio.sleep(5)
+                logger.error(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 2 секунды')
+                await asyncio.sleep(2)
+            finally:
+                ping_task.cancel()
 
     async def get_symbols(self):
         while True:
@@ -100,28 +115,44 @@ class WS_bitget:
         return self.data
 
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
-        while True:
-            try:
-                logger.debug('[BITGET SYSTEM] Сбор фандингов')
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(self.url_4_symbols) as response:
-                        data = await response.json()
+        logger.debug('[BITGET SYSTEM] Сбор фандингов')
 
-                        funding_dict = {}
+        funding_dict = {}
 
-                        for item in data['data']:
-                            symbol = item.get('symbol')
-                            if symbol in symbols_list:
-                                funding = float(item.get('fundingRate')) * 100
-                                next_funding_time = await self.get_next_funding(symbol)
+        # Получаем список символов, которых ещё нет в кэше
+        missing_symbols = [symbol for symbol in symbols_list if cache_manager.get_symbol_funding_data(symbol, 'bitget') is None or cache_manager.is_funding_expired(symbol, 'bitget')]
 
-                                funding_dict[symbol] = {
-                                    'funding': funding,
-                                    'next_funding_time': next_funding_time,
-                                }
-                        return funding_dict
-            except Exception as error:
-                logger.error(f'[BITGET ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
+        # Если есть чего забирать — идём в API
+        if missing_symbols:
+            logger.debug('===========================REST API BITGET')
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.url_4_symbols) as response:
+                    data = await response.json()
+
+                    for item in data['data']:
+                        item_symbol = item.get('symbol')
+
+                        if item_symbol in missing_symbols:
+                            funding = float(item.get('fundingRate')) * 100
+                            next_funding_time = await self.get_next_funding(item_symbol)
+
+                            cache_manager.set_symbol_data(
+                                symbol=item_symbol,
+                                stock='bitget',
+                                funding=funding,
+                                next_time=next_funding_time,
+                            )
+
+        # Теперь собираем всё в funding_dict из кэша
+        for symbol in symbols_list:
+            cached = cache_manager.get_symbol_funding_data(symbol, 'bitget')
+            if cached:
+                funding_dict[symbol] = {
+                    'funding': float(cached.get('funding')),
+                    'next_funding_time': int(cached.get('next_time'))
+                }
+
+        return funding_dict
 
     async def get_next_funding(self, symbol) -> int:
         url = f'https://api.bitget.com/api/v2/mix/market/funding-time?symbol={symbol}&productType=usdt-futures'
@@ -131,9 +162,9 @@ class WS_bitget:
                     async with session.get(url) as response:
                         data = await response.json()
                         data = data['data'][0]
-                        return data['nextFundingTime']
+                        return int(data['nextFundingTime'])
             except Exception as error:
-                logger.error(f'[BITGET ERROR] Произошла ошибка при сборе фандинга - {error}. Через 5 сек заново')
+                print(f'[BITGET ERROR] Произошла ошибка при сборе фандинга - {error}. Через 5 сек заново')
                 await asyncio.sleep(5)
 
 
