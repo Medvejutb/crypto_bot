@@ -4,20 +4,19 @@ import aiohttp
 import websockets
 import requests
 import json
-from utils.views import Logging_manager
-from cache_manager import Cache_manager
 
-cache_manager = Cache_manager()
-logger = Logging_manager.get_logger()
 
 class WS_binance:
-    def __init__(self):
+    def __init__(self, logger, cache_manager):
+        self.logger = logger
+        self.cache_manager = cache_manager
         self.symbols = []
         self.data = {'stock': 'binance'}
         self.ready = False
         self.url_4_prices = None
         self.connection = False
         self.url_4_fundings = 'https://fapi.binance.com/fapi/v1/premiumIndex'
+        self.ready_event = asyncio.Event()
 
     def load_symbols(self):
         dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -32,7 +31,7 @@ class WS_binance:
             try:
                 async with websockets.connect(self.url_4_prices) as websocket:
                     self.connection = True
-                    logger.debug('[BINANCE SYSTEM] Соединение уставнолено')
+                    self.logger.debug('[BINANCE SYSTEM] Соединение уставнолено')
                     while True:
                         msg = await websocket.recv()
                         message = json.loads(msg)
@@ -43,16 +42,18 @@ class WS_binance:
                             'next_funding_time': None,
                             'time': int(data['E'])
                         }
+
+                        if not self.ready and len(self.data) > 30:
+                            self.logger.success('[BINANCE SYSTEM] Данных достаточно. Биржа готова.')
+                            self.ready = True
+                            self.ready_event.set()
+                        
+                        await self.cache_manager.set_price(data['s'], 'binance', float(data['c']))
+
             except Exception as error:
                 self.connection = False
-                logger.error(f'[BINANCE SYSTEM] Ошибка в сокете: {error}. Переподключаюсь через 5 секунд...')
+                self.logger.error(f'[BINANCE SYSTEM] Ошибка в сокете: {error}. Переподключаюсь через 5 секунд...')
                 await asyncio.sleep(5)
-
-    def check_ready(self) -> bool:
-        if len(self.data) <= 30:
-            return False
-        self.ready = True
-        return True
 
     def check_connection(self):
         if self.connection:
@@ -67,46 +68,35 @@ class WS_binance:
         pass
 
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
-        logger.debug('[BINANCE SYSTEM] Сбор фандингов')
-        while True:
-            funding_dict = {}
+        self.logger.debug('[BINANCE SYSTEM] Прямой сбор фандингов с API без кэша')
+        funding_dict = {}
 
-            missing_symbols = [symbol for symbol in symbols_list if cache_manager.get_symbol_funding_data(symbol, 'binance') is None or cache_manager.is_funding_expired(symbol, 'binance')]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.url_4_fundings) as response:
+                    data = await response.json()
 
-            if missing_symbols:
+                    funding_dict = {}
 
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        
-                        async with session.get(self.url_4_fundings) as response:
-                            data = await response.json()
+                    for item in data:
+                        symbol = item.get('symbol')
+                        if symbol in symbols_list:
+                            funding = float(item.get('lastFundingRate', 0)) * 100
+                            next_funding_time = int(item.get('nextFundingTime', 0))
 
-                            for item in data:
-                                symbol = item.get('symbol')
-                                if symbol in missing_symbols:
-                                    
-                                    logger.debug('=====================REST API BINANCE')
-                                    funding = float(item.get('lastFundingRate', 0)) * 100
-                                    next_funding_time = int(item.get('nextFundingTime', 0))
+                            funding_dict[symbol] = {
+                                'funding': funding,
+                                'next_funding_time': next_funding_time,
+                            }
 
-                                    cache_manager.set_symbol_data(
-                                        symbol=symbol,
-                                        stock='binance',
-                                        funding=funding,
-                                        next_time=next_funding_time,
-                                    )
+                    return funding_dict
 
-                except Exception as error:
-                    logger.error(f'[BINANCE ERROR] Произошла ошибка при сборе фандингов\nОшибка - {error}')
-        
-            for symbol in symbols_list:
-                cached = cache_manager.get_symbol_funding_data(symbol, 'binance')
-                if cached:
-                    funding_dict[symbol] = {
-                        'funding': float(cached.get('funding')),
-                        'next_funding_time': int(cached.get('next_time')),
-                        }
-            return funding_dict
+        except Exception as error:
+            self.logger.error(f'[BINANCE ERROR] Ошибка при запросе фандингов с API\nОшибка - {error}')
+
+
+
+
 
 
 def get_coins_with_status_TRADING() -> list:

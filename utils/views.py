@@ -19,7 +19,7 @@ class Logging_manager:
         if MODE == 'prod':
             _logger.add(sys.stdout,
                         level='INFO',
-                        format="<yellow>{time:YYYY-MM-DD HH:mm:ss}</yellow> | {level} | {message}",
+                        format="<yellow>{time:YYYY-MM-DD HH:mm}</yellow> | {level} | {message}",
                         enqueue=True)
 
             _logger.add("logs/logs_{time}.log",

@@ -28,7 +28,7 @@ class Calculator:
             middle_price = (higher_price + lower_price) / 2
             spread = (higher_price - lower_price) / middle_price * 100
 
-            if abs(spread) >= config.THRESHOLD:
+            if abs(spread) >= config.UNCORRELATION_PARA:
                 return {
                     'difference': spread,
                     'higher_price': higher_price,

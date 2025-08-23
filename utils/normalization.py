@@ -2,17 +2,22 @@ from datetime import datetime
 
 def smart_round(price: float) -> str:
 
-    if price is None:
-        return price
+    try:
 
-    if float(price) > 100:
-        return f"{price:.0f}"
-    elif float(price) > 1:
-        return f"{price:.2f}"
-    elif float(price) > 0.01:
-        return f"{price:.3f}"
-    else:
-        return f"{price:.6f}"
+        if price is None:
+            return price
+
+        if float(price) > 100:
+            return f"{price:.0f}"
+        elif float(price) > 1:
+            return f"{price:.2f}"
+        elif float(price) > 0.01:
+            return f"{price:.3f}"
+        else:
+            return f"{price:.6f}"
+    except Exception as error:
+        print('++++++++++===========++++++++++++===========+++++++++++++++================')
+        print(f'Ошибка в функции округления чисел - объект: {price},Ошибка: {error}')
 
 
 def get_human_time(future):
@@ -59,24 +64,26 @@ def join_stocks_to_dict(stock1, stock2):
 
     return data_coins
 
-def join_stocks_dicts_to_main_stocks_dict(symbols_prices, symbols_fundings):
-    main_stocks_dict = {}
+# def join_stocks_dicts_to_main_stocks_dict(best_spreads, ready_fundings, exchanges_data):
+#     main_stocks_dict = {}
 
-    for symbol, price_exchanges in symbols_prices.items():
-        main_stocks_dict[symbol] = {}
+#     for symbol, (ex1, ex2, spread) in best_spreads.items():
+#         fundings = ready_fundings.get(symbol)
+#         if not fundings or ex1 not in fundings or ex2 not in fundings:
+#             continue
 
-        for exchange, price_data in price_exchanges.items():
-            # Сразу собираем основу
-            main_stocks_dict[symbol][exchange] = {
-                'price': float(price_data['price']),
-                'time': int(price_data['time']),
-                'funding': None,
-                'next_funding_time': None
-            }
+#         main_stocks_dict[symbol] = {}
 
-            funding_data = symbols_fundings.get(symbol, {}).get(exchange)
-            if funding_data:
-                main_stocks_dict[symbol][exchange]['funding'] = funding_data.get('funding')
-                main_stocks_dict[symbol][exchange]['next_funding_time'] = get_human_time(funding_data.get('next_funding_time'))
+#         for exch in (ex1, ex2):
+#             price_data = exchanges_data.get(symbol, {}).get(exch, {})
+#             funding = fundings.get(exch)
 
-    return main_stocks_dict
+#             main_stocks_dict[symbol][exch] = {
+#                 'price': float(price_data.get('price', 0)),
+#                 'time': int(price_data.get('time', 0)),
+#                 'funding': funding,
+#                 'next_funding_time': None
+#             }
+
+#     return main_stocks_dict
+

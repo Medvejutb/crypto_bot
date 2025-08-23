@@ -1,109 +1,188 @@
-import redis
-import json
-import time
+import redis.asyncio as redis
+import asyncio, json, time
 from utils.views import Logging_manager
 
 logger = Logging_manager.get_logger()
 
+def cache_guard(func):
+    """Декоратор, который ловит любые ошибки Redis
+    и ссыт в лог"""
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.warning(f"[CACHE ERROR] функция {func.__name__} ёбнулась: {e!r}")
+            return None
+    return wrapper
+
+
 class Cache_manager:
-
     def __init__(self):
-
         self.r = redis.Redis(
-        host='localhost',
-        port=6379,
-        db=0,
-        decode_responses=True
+            host="localhost", port=6379, db=0,
+            decode_responses=True, encoding="utf-8"
         )
     
-    def set_symbol_data(self, symbol, stock, funding=None, next_time=None, last_time=None):
-        existing = self.get_symbol_funding_data(symbol, stock)
-        if existing is None:
-            existing = {
-            'funding': funding,
-            'next_time': next_time,
-            'last_time': last_time
-        }
-        else:
-            if funding is not None:
-                existing["funding"] = funding
-            if next_time is not None:
-                existing["next_time"] = next_time
-            if last_time is not None:
-                existing["last_time"] = last_time
 
-        key = f"funding:{symbol}:{stock}"
-        self.r.set(key, json.dumps(existing))
-        logger.debug(f'[CACHE SYSTEM] Символ {symbol} биржи {stock} ДОБАВЛЕН / ОБНОВЛЁН в кэше')
+    @cache_guard
+    async def get_all_symbols(self):
+        cursor = 0
+        symbols = set()
 
-    def add_symbol_funding_para(self, symbol, stock, funding=None, next_time=None, last_time=None):
-        key = f"funding:{symbol}:{stock}"
-        value = {
-            'funding': funding,
-            'next_time': next_time,
-            'last_time': last_time
-        }
-        self.r.set(key, json.dumps(value))
+        while True:
+            cursor, keys = await self.r.scan(cursor=cursor, match="*:*:*", count=1000)
+            for key in keys:
+                parts = key.split(":")
+                if len(parts) == 3:
+                    symbols.add(parts[0])
+            if cursor == 0:
+                break
 
+        return sorted(list(symbols))
         
-    def get_symbol_funding_data(self, symbol, stock):
-        key = f"funding:{symbol}:{stock}"
-        data = self.r.get(key)
-        if data:
-            return json.loads(data)
-        return None
-    
-    def get_symbol_funding_next_time(self, symbol, stock):
-        next_funding_time = self.get_symbol_funding_data(symbol, stock)['next_time']
-        if next_funding_time is None:
+
+
+    # ---------------- PRICES ---------------- #
+
+    @cache_guard
+    async def set_price(self, symbol: str, exchange: str,
+                        price: float, life: int = 5):
+        key = f"{symbol}:{exchange}:PRICE"
+        payload = {"value": price, "ts": time.time()}
+        await self.r.set(key, json.dumps(payload), ex=life)
+
+    @cache_guard
+    async def get_price(self, symbol: str, exchange: str):
+        key = f"{symbol}:{exchange}:PRICE"
+        raw = await self.r.get(key)
+        if not raw:
             return None
-        return int(next_funding_time)
+        return json.loads(raw)["value"]
 
-
-    def update_symbol(self, symbol, stock, funding=None, next_time=None, last_time=None):
-        existing = self.get_symbol_funding_data(symbol, stock)
-        if not existing:
-            return False
-
-        if funding is not None:
-            existing["funding"] = funding
-        if next_time is not None:
-            existing["next_time"] = next_time
-        if last_time is not None:
-            existing["last_time"] = last_time
-
-        key = f"funding:{symbol}:{stock}"
-        self.r.set(key, json.dumps(existing))
-        logger.debug(f'[CACHE SYSTEM] Символ {symbol} биржи {stock} ОБНОВЛЕЁН в кэше')
-
-        return True
-
-
-    def get_symbols_list(self):
-        keys = self.r.keys("funding:*")
-        return [k.split("funding:")[1].split(":") for k in keys]  # вернёт [symbol, stock]
-
-    
-    def is_funding_expired(self, symbol, stock):
-
-        symbol_data = self.get_symbol_funding_data(symbol, stock)
-
-        if symbol_data is None or symbol_data['next_time'] - time.time() <= 0:
+    @cache_guard
+    async def is_price_old(self, symbol: str, exchange: str,
+                           max_age: int = 5):
+        key = f"{symbol}:{exchange}:PRICE"
+        raw = await self.r.get(key)
+        if not raw:
             return True
-        
-        return False
+        ts = json.loads(raw)["ts"]
+        return (time.time() - ts) > max_age
+
+    # --------------- FUNDING ---------------- #
+
+    @cache_guard
+    async def set_funding(self, symbol: str, exchange: str,
+                          funding: float, next_time: float | None):
+        key = f"{symbol}:{exchange}:FUNDING"
+        payload = {"value": funding, "next_time": next_time}
+        await self.r.set(key, json.dumps(payload), ex=60*5)
+
+    @cache_guard
+    async def set_unsupported_funding(self, symbol: str, exchange: str):
+        key = f"{symbol}:{exchange}:FUNDING"
+        payload = {"value": 'unsupported'}
+        await self.r.set(key, json.dumps(payload), ex=9 * 3600)
 
 
-    def check_none_funding(self) -> list:
-        result = []
-        for symbol, stock in self.get_symbols_list():
-            data = self.get_symbol_funding_data(symbol, stock)
-            if data and data['funding'] is None:
-                result.append((symbol, stock))
-        return result
+    @cache_guard
+    async def get_funding(self, symbol: str, exchange: str):
+        key = f"{symbol}:{exchange}:FUNDING"
+        raw = await self.r.get(key)
+        return json.loads(raw)["value"] if raw else None
+    
+
+    @cache_guard
+    async def get_next_funding_time(self, symbol: str, exchange: str):
+        key = f"{symbol}:{exchange}:FUNDING"
+        raw = await self.r.get(key)
+        if not raw:
+            return None
+
+        try:
+            payload = json.loads(raw)
+            next_time = payload.get("next_time")
+            return float(next_time) if isinstance(next_time, (int, float, str)) and str(next_time).replace('.', '', 1).isdigit() else None
+        except Exception:
+            return None
+
+    @cache_guard
+    async def is_funding_old(self, symbol: str, exchange: str):
+        next_time = await self.get_next_funding_time(symbol, exchange)
+        # Если next_time не число — сразу до свидания
+        if not isinstance(next_time, (int, float)):
+            return True
+        return time.time() >= next_time
+    
+    # -------------PRICE_FUNDING_IN_DICT----------#
+
+    @cache_guard
+    async def set_symbol_data(self,
+                                     symbol: str,
+                                     exchange: str,
+                                     price: float,
+                                     funding: float,
+                                     next_time: float | None
+                                     ):
+        key = f'{symbol}:{exchange}:PRICE_FUNDING_DICT'
+        value = {
+            'price': price,
+            'funding': funding,
+            'next_time': next_time,
+        }
+        await self.r.set(key, json.dumps(value), ex=30)
+    
+    async def get_symbol_data(self,
+                                     symbol: str,
+                                     exchange: str,
+                                     ):
+        key = f'{symbol}:{exchange}:PRICE_FUNDING_DICT'
+        raw = await self.r.get(key)
+        return json.loads(raw) if raw else None
+
+    # ------------- UNCORRELATIONS ------------ #
+
+    @cache_guard
+    async def set_uncor(self, uncor_dict: dict):
+        await self.r.set("LAST_UNCORRELATIONS", json.dumps(uncor_dict), ex=1)
+
+    @cache_guard
+    async def get_uncor(self):
+        raw = await self.r.get("LAST_UNCORRELATIONS")
+        return json.loads(raw) if raw else None
+    
+    # -------------ACTIVE_SYMBOL_PAIRS_IN_POSITIONS-------------#
+
+    @cache_guard
+    async def add_active_position_symbol_pair(self, key: set):
+        raw = await self.r.get("ACTIVE_POS_PAIR")
+        combos = json.loads(raw) if raw else []
+
+        new_combo = sorted(key)
+
+        if new_combo not in combos:
+            combos.append(new_combo)
+            await self.r.set("ACTIVE_POS_PAIR", json.dumps(combos))
 
 
+    @cache_guard
+    async def get_active_position_symbol_pairs(self) -> list[set] | None:
+        raw = await self.r.get("ACTIVE_POS_PAIR")
+        if not raw:
+            return None
 
-    def del_symbol(self, symbol, stock):
-        self.r.delete(f'funding:{symbol}:{stock}')
-        logger.debug(f'[SYSTEM] Символ {symbol} биржи {stock} УДАЛЁН из кэша')
+        combos = json.loads(raw)
+        return [tuple(sorted(c)) for c in combos]
+    
+    @cache_guard
+    async def del_active_position_symbol_pair(self, key: tuple):
+        raw = await self.r.get("ACTIVE_POS_PAIR")
+        if not raw:
+            return
+
+        combos = json.loads(raw)
+        target = list(sorted(key))
+
+        if target in combos:
+            combos.remove(target)
+            await self.r.set("ACTIVE_POS_PAIR", json.dumps(combos))
