@@ -27,7 +27,7 @@ class WS_bitget:
                 self.logger.error(f"[BITGET PING ERROR] {e}")
                 return
 
-    async def start_socket(self,queue):
+    async def start_socket(self):
         await self.get_symbols()
 
         subscribe_settings = {

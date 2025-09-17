@@ -186,3 +186,30 @@ class Cache_manager:
         if target in combos:
             combos.remove(target)
             await self.r.set("ACTIVE_POS_PAIR", json.dumps(combos))
+    
+    #----------------POSITIONS_MESSAGES_FOR_ALERT--------------#
+    # @cache_guard
+    # async def set_last_positions_messages(self, order_data):
+    #     key = 'POSITION_MESSAGES'
+
+    #     raw = await self.get_last_positions_messages()
+
+    #     if not raw:
+    #         return None
+        
+    #     for pair in raw:
+    #         if order_data['pair_key'] == raw['pair_key']:
+    #             raw[pair]
+
+    #     value_= order_data
+
+    #     await self.r.set(key, json.dumps(value), ex=30)
+
+    # @cache_guard
+    # async def get_last_positions_messages(self) -> list:
+    #     raw = await self.r.get("POSITION_MESSAGES")
+    #     if not raw:
+    #         return None
+
+    #     combos = json.loads(raw)
+    #     return [c for c in combos]

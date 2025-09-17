@@ -3,6 +3,8 @@
 
 BOT_TOKEN = '7858814635:AAGa6pJYQs0-WE-pkOX9gZDQcVuhKPk5zIk'
 CHAT_ID = 5608629096
+
+
 # Интервал между проверками
 CHECK_INTERVAL = 20
 

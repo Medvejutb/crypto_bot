@@ -1,6 +1,7 @@
 .logs
 .venv/lib64
 *.py[cod]
+.env
 .venv/pyvenv.cfg
 .venv/bin/activate
 .venv/bin/activate.csh

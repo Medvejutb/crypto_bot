@@ -29,6 +29,11 @@ class Logging_manager:
                         compression="zip",
                         enqueue=True)
         else:
-            _logger.add(sys.stdout, level='DEBUG', enqueue=True)
+            _logger.add(sys.stdout,
+                        level='DEBUG',
+                        enqueue=True,
+                        colorize=True,
+                        format="<green>{time:HH:mm}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+                        )
 
         cls._is_configured = True

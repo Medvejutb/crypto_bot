@@ -152,28 +152,6 @@ class Uncorrelation_manager:
             
             
         return to_return
-    
-    # async def _get_best_spreads(self):
-    #     self.best_spreads.clear()
-    #     to_return = {}
-    #     active_pairs = await self.cache_manager.get_active_position_symbol_pairs() or []
-
-    #     for symbol, spreads in self.valid_spreads.items():
-
-    #         best = max(spreads, key=lambda x: abs(x[2]))
-    #         self.best_spreads[symbol] = best
-    #         to_return[symbol] = best
-
-    #         # добавляем активные пары, если их ещё нет
-    #         for exch1, exch2, spread in spreads:
-    #             key = tuple(sorted([symbol, exch1, exch2]))
-    #             if key in active_pairs:
-    #                 # уникальный ключ, чтобы не перезаписать обычный best
-    #                 unique_key = f"{symbol}_{exch1}_{exch2}"
-    #                 self.best_spreads[unique_key] = (exch1, exch2, spread)
-    #                 to_return[unique_key] = (exch1, exch2, spread)
-
-    #     return to_return
 
     async def _get_fundings_for_best_spreads(self, funding_queue, best_spreads_data, get_fundings):
 

@@ -123,19 +123,11 @@ class WS_okx:
                             self.instId_map[instId] = symbol
                             self.instId_list.append(instId)
                             self.symbols.append(symbol)
-                            ctVal = item.get('ctVal')
-                            lotSz = item.get('lotSz')
-                            minSz = item.get('minSz')
-
                             self.data[symbol] = {
-                                'instId': instId,
                                 'price': None,
                                 'funding': None,
                                 'next_funding_time': None,
-                                'time': None,
-                                'ctVal': ctVal,
-                                'lotSz': lotSz,
-                                'minSz': minSz,
+                                'time': None
                             }
                     return
             except Exception as error:
@@ -170,27 +162,39 @@ class WS_okx:
     def get_prices_data(self):
         return self.data
     
-    async def _usd_to_contracts(
-        self,
-        instId: str,
-        usd_count: Decimal,
-        ):
+
+    async def _usd_to_contracts(self, usd_volume, instId):
         try:
             symbol = self.instId_map[instId]
-            ctVal = Decimal(str(self.data[symbol]['ctVal'])) #Decimal(data[0]['ctVal'])
-            lotSz = Decimal(str(self.data[symbol]['lotSz'])) #Decimal(data[0]['lotSz'])
-            minSz = Decimal(str(self.data[symbol]['minSz']))
-            price = Decimal(str(self.data[symbol]['price']))
-            sz = Decimal(str(usd_count)) / (price * ctVal)
-            size = (sz // lotSz) * lotSz
-            if size < minSz:
-                self.logger.warning(f"[OKX SYSTEM] Объём {usd_count} USD слишком мал для {instId}, минималка {minSz}")
-                return None
-            
-            return format(size, 'f')
+            async with self.session.get(self.url_4_ctVal + instId) as resp:
+                info = await resp.json()
+                data_list = info.get('data')
+                if not data_list:
+                    self.logger.error(f'[OKX SYSTEM] Нет данных по инструменту {instId}')
+                    return None
+
+                ctVal = Decimal(data_list[0]['ctVal'])
+                lotSz = Decimal(data_list[0]['lotSz'])
+                print(lotSz)
+                last_price = Decimal(str(self.data[symbol]['price']))
+
+                # считаем контракты
+                sz = Decimal(str(usd_volume)) / (last_price * ctVal)
+
+                # округляем вниз до ближайшего кратного lotSz
+                sz = sz.quantize(lotSz, rounding=ROUND_DOWN)
+                print(sz)
+
+                if sz < lotSz:
+                    self.logger.warning(f"[OKX SYSTEM] Объём {usd_volume} USD слишком мал для {instId}, минималка {lotSz}")
+                    return None
+
+                # возвращаем строкой для API
+                return format(sz, 'f')
         except Exception as error:
             self.logger.error(f'[OKX SYSTEM] Произошел сбой при конвертации бабла в контракты\nОшибка - {error}')
             return None
+
     
     def make_signature(self, timestamp, body: str):
         try:
@@ -204,31 +208,25 @@ class WS_okx:
         except Exception as error:
             self.logger.error(f'[OKX SYSTEM] Произошел сбой при создании подписи для ордера\nОшибка - {error}')
             return None
-    
-    async def place_order(
-        self,
-        instId: str,
-        side: str,
-        usd_count: Decimal,
-        ):
 
-        if not '-USDT-SWAP' in instId:
-            instId = instId + '-USDT-SWAP'
-
+    async def place_order(self, instId: str, side: str, usd_volume: Decimal):
         timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+        # считаем размер в контрактах (возвращается уже строка)
         size = await self._usd_to_contracts(
             instId=instId,
-            usd_count=usd_count
+            usd_volume=usd_volume
         )
 
-        body = json.dumps({
+        body_dict = {
             "instId": instId,
-            "tdMode": "cross",
+            "tdMode": "cross",      # для фьючей или свопов (если надо cash — меняй тут)
             "side": side,
             "ordType": "market",
-            "sz": size
-        })
+            "sz": size              # строка, например "0.001"
+        }
+
+        body = json.dumps(body_dict, separators=(",", ":"))  # без лишних пробелов
 
         headers = {
             "OK-ACCESS-KEY": self.API_KEY,
@@ -241,9 +239,10 @@ class WS_okx:
         async with self.session.post(
             url=self.url_for_order,
             headers=headers,
-            data=body,
-        ) as response:
-            return await response.json()
+            data=body
+        ) as resp:
+            return await resp.json()
+
 
 
 async def main():

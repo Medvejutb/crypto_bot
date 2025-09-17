@@ -45,7 +45,7 @@ class Sockets_manager:
         
             asyncio.create_task(self.binance.start_socket())
 
-            asyncio.create_task(self.bitget.start_socket(queue))
+            asyncio.create_task(self.bitget.start_socket())
 
             asyncio.create_task(self.okx.start_socket(queue))
 

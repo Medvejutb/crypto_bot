@@ -93,6 +93,8 @@ class WS_binance:
 
         except Exception as error:
             self.logger.error(f'[BINANCE ERROR] Ошибка при запросе фандингов с API\nОшибка - {error}')
+    
+    async def place_order()
 
 
 
@@ -114,7 +116,4 @@ def get_coins_with_status_TRADING() -> list:
 
     with open('binance_symbols.json', 'w') as file:
         json.dump(coins_list, file, indent=4, ensure_ascii=False)
-
-
-
 
