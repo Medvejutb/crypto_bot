@@ -38,9 +38,13 @@ class Position_dispatcher:
 
                 try:
                     for symbol, data in uncorrelations.items():
+                        if symbol == 'COAIUSDT':
+                            continue
                         uncorrelation = data['difference']
                         higher_exchange = data['higher_exchange']
+                        higher_price = data['higher_price']
                         lower_exchange = data['lower_exchange']
+                        lower_price = data['lower_price']
                         key = (symbol, higher_exchange, lower_exchange)
 
                         if (
@@ -56,7 +60,9 @@ class Position_dispatcher:
                                 start_time=time.time(),
                                 symbol=symbol,
                                 higher_exchange=higher_exchange,
+                                higher_price=higher_price,
                                 lower_exchange=lower_exchange,
+                                lower_price=lower_price,
                                 logger=self.logger,
                                 position_config=self.position_config,
                                 del_pos_func=lambda k=key: self.delete__position(k),
@@ -101,7 +107,9 @@ class Position_manager:
             uncorrelation_value: float,
             symbol,
             lower_exchange: str,
+            lower_price: str,
             higher_exchange: str,
+            higher_price: str,
             logger,
             order_manager,
             position_config,
@@ -117,7 +125,9 @@ class Position_manager:
         self.pair_key = key # symbol , stock, stock
         self.symbol = symbol
         self.lower_exchange = lower_exchange
+        self.lower_price = lower_price
         self.higher_exchange = higher_exchange
+        self.higher_price = higher_price
 
         # параметры раскорреляяций
         self.uncorrelation_value = uncorrelation_value
@@ -149,9 +159,21 @@ class Position_manager:
 
         symbol, stock1, stock2 = self.pair_key
 
+        """
+        ДлЯ тестов разрешено выполнять сделки даже если какая то биржа не готова
+        """
+
         if stock1 not in self.EXCHANGES_FOR_IN or stock2 not in self.EXCHANGES_FOR_IN:
             await self.del_pos_func(self.pair_key)
             return
+        if stock1 not in self.EXCHANGES_FOR_IN and stock2 not in self.EXCHANGES_FOR_IN:
+            await self.del_pos_func(self.pair_key)
+            return
+        # if stock1 == 'bitget' or stock2 == 'bitget':
+        #     self.logger.success('BITGET_BITGET_BITGET')
+        # else:
+        #     await self.del_pos_func(self.pair_key)
+        #     return
 
         self.logger.debug(f'[POSITION SYSTEM] Намёк на позицию, задержка перед стартом - {self.WAIT_POSITION}.'
                           f'Пара - {self.pair_key}')
@@ -203,54 +225,98 @@ class Position_manager:
                 
                 if is_enter:
 
+                    # ---------- ENTER ----------
                     order_data = {
                         'pair_key': self.pair_key,
                         'symbol': self.symbol,
-                        'sell_exchange': self.higher_exchange,
-                        'buy_exchange': self.lower_exchange,
-                        'volume': self.money_for_one_step,
                         'stage': 'enter',
                         'uncorrelation': self.uncorrelation_value,
-                        'step': self.enter_steps_done_count+1,
+                        'step': self.enter_steps_done_count + 1,
                         'steps_count': self.STEP_COUNT,
+                        'volume': self.money_for_one_step,
+                        'sell_exchange': {
+                            'exchange': self.higher_exchange,
+                            'price': self.higher_price,
+                            # продаём на более дорогой — это SELL (верхняя биржа), posSide для неё = short (мы создаём шорт позицию там)
+                            'side': 'SELL',
+                            'posSide': 'short'
+                        },
+                        'buy_exchange': {
+                            'exchange': self.lower_exchange,
+                            'price': self.lower_price,
+                            # покупаем на дешёвой — BUY (нижняя биржа), posSide для неё = long (мы открываем лонг там)
+                            'side': 'BUY',
+                            'posSide': 'long'
+                        }
                     }
 
-                    await self.order_manager.make_operation(order_data)
-                    self.enter_steps_done_count += 1
-
-                    self.logger.info(
-                        f'[POSITION SYSTEM] Шаг входа - {self.pair_key}'
-                        f'Раскор сейчас - {self.uncorrelation_value}'
+                    result = await self.order_manager.make_operation(
+                        order_data
                         )
+                    if result is None:
+                        self.logger.warning('[POSITION SYSTEM]' \
+                                            'Шаг входа не выполнен')
+                        await asyncio.sleep(20)
+                        await self.del_pos_func(self.pair_key)
+                        return
+                    else:
+                        self.enter_steps_done_count += 1
+
+                        self.logger.info(
+                            f'[POSITION SYSTEM] Шаг входа - {self.pair_key}.'
+                            f'Раскор - {self.uncorrelation_value}'
+                            )
 
                 elif is_exit:
 
+                    # ---------- EXIT ----------
                     order_data = {
                         'pair_key': self.pair_key,
                         'symbol': self.symbol,
-                        'sell_exchange': self.lower_exchange,
-                        'buy_exchange': self.higher_exchange,
-                        'volume': self.money_for_one_step,
                         'stage': 'exit',
                         'uncorrelation': self.uncorrelation_value,
-                        'step': self.exit_steps_done_count+1,
+                        'step': self.exit_steps_done_count + 1,
                         'steps_count': self.STEP_COUNT,
+                        'volume': self.money_for_one_step,
+                        # чтобы закрыть: на верхней бирже закрываем шорт => BUY (закупаем чтобы закрыть short)
+                        'sell_exchange': {
+                            'exchange': self.higher_exchange,
+                            'price': self.higher_price,
+                            'side': 'BUY',
+                            'posSide': 'short'
+                        },
+                        # на нижней бирже закрываем лонг => SELL (продаём, чтобы закрыть long)
+                        'buy_exchange': {
+                            'exchange': self.lower_exchange,
+                            'price': self.lower_price,
+                            'side': 'SELL',
+                            'posSide': 'long'
+                        }
                     }
 
-                    await self.order_manager.make_operation(order_data)
-                    self.exit_steps_done_count += 1
-
-                    self.logger.info(
-                        f'[POSITION SYSTEM] Шаг выхода - {self.pair_key}'
-                        f'Раскор сейчас - {self.uncorrelation_value}'
+                    result = await self.order_manager.make_operation(
+                        order_data
                         )
-                    
-
-                    if self.enter_steps_done_count == self.exit_steps_done_count:
-                        self.position_state_for_dispatcher = 'close'
-                        self.logger.success(f'[POSITION SYSTEM] {self.pair_key} - Позиция закрыта ')
+                    if result is None:
+                        self.logger.warning('[POSITION SYSTEM] ' \
+                                            'Шаг выхода не выполнен')
+                        await asyncio.sleep(20)
                         await self.del_pos_func(self.pair_key)
                         return
+                    else:
+                        self.exit_steps_done_count += 1
+
+                        self.logger.info(
+                            f'[POSITION SYSTEM] Шаг выхода - {self.pair_key}.'
+                            f'Раскор - {self.uncorrelation_value}'
+                            )
+                        
+
+                        if self.enter_steps_done_count == self.exit_steps_done_count:
+                            self.position_state_for_dispatcher = 'close'
+                            self.logger.success(f'[POSITION SYSTEM] {self.pair_key} - Позиция закрыта ')
+                            await self.del_pos_func(self.pair_key)
+                            return
 
 
             except Exception as error:
@@ -259,12 +325,6 @@ class Position_manager:
     
     async def set_uncorrelation(self, uncorrelation):
         self.uncorrelation_value = uncorrelation
-    
-    async def _to_enter_step(self):
-        pass
-
-    async def _to_exit_step(self):
-        pass
 
     def __str__(self):
         return f'{self.pair_key}\nhigher exchange - {self.higher_exchange}\nlower exchange - {self.lower_exchange}\nuncor - {self.uncorrelation_value}'

@@ -36,19 +36,23 @@ class Funding_manager:
             if funding_from_cache == 'unsupported':
                 self.blacklist_for_symbols_with_stocks[key] = 'unsupported'
                 continue
-            if funding_from_cache is None:
-                # self.logger.debug(f'[FUNDING] Обработка {symbol} с {exchange}')
-                func = self.funding_funcs[exchange]
-                funding_data = await func(symbol)
-                funding = funding_data[symbol]['funding']
-                next_funding_time = funding_data[symbol]['next_funding_time']
-                # self.logger.debug(f'[FUNDING] Данные получены c {exchange} - {symbol}: {funding_data}')
-                await self.cache_manager.set_funding(symbol, exchange, funding, next_funding_time)           
-                self.blacklist_for_symbols_with_stocks[key] = 'ok'
-            else:
-                funding = funding_from_cache
-                next_funding_time = await self.cache_manager.get_next_funding_time(symbol, exchange)
-
+            try:
+                if funding_from_cache is None:
+                    # self.logger.debug(f'[FUNDING] Обработка {symbol} с {exchange}')
+                    func = self.funding_funcs[exchange]
+                    funding_data = await func(symbol)
+                    funding = funding_data[symbol]['funding']
+                    next_funding_time = funding_data[symbol]['next_funding_time']
+                    # self.logger.debug(f'[FUNDING] Данные получены c {exchange} - {symbol}: {funding_data}')
+                    await self.cache_manager.set_funding(symbol, exchange, funding, next_funding_time)           
+                    self.blacklist_for_symbols_with_stocks[key] = 'ok'
+                else:
+                    funding = funding_from_cache
+                    next_funding_time = await self.cache_manager.get_next_funding_time(symbol, exchange)
+            except TypeError as error:
+                self.logger.error(f'[FUNDING SYSTEM] {symbol}')
+            except Exception as error:
+                self.logger.error(f'[FUNDING SYSTEM] {symbol}')
             ready_fundings[key] = {
                 'funding': funding,
                 'next_funding_time': next_funding_time

@@ -53,7 +53,8 @@ alert_manager = Alert_manager(
 
 order_manager = Order_manager(
     cache_manager=cache_manager,
-    logger=logger
+    logger=logger,
+    order_funcs=sockets_manager.order_funcs,
 )
 
 positions_dispatcher = Position_dispatcher(
@@ -75,8 +76,8 @@ async def ws_worker(queue):
     logger.success('[WEBSOCKET SYSTEM] Запуск сокетов...')
     await sockets_manager.start_all_sockets(queue=queue)
 
-async def funding_worker():
-    logger.success('[FUNDING SYSTEM] Запуск работы фандингов')
+# async def funding_worker():
+#     logger.success('[FUNDING SYSTEM] Запуск работы фандингов')
 
 
 async def uncorrelation_worker(funding_queue):
@@ -108,7 +109,7 @@ async def main():
 
     asyncio.create_task(ws_worker(queue))
 
-    asyncio.create_task(funding_worker())
+    # asyncio.create_task(funding_worker())
 
     asyncio.create_task(uncorrelation_worker(funding_queue))
 

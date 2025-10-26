@@ -100,23 +100,33 @@ class Uncorrelation_manager:
 
     async def _get_spreads(self):
         for symbol, exchanges in self.exchanges_data.items():
-
             for exchange_1, exchange_2 in combinations(exchanges, 2):
 
+                price1 = exchanges[exchange_1].get('price')
+                price2 = exchanges[exchange_2].get('price')
+
+                # фильтр на None, пустые строки и нули
+                if not price1 or not price2:
+                    # self.logger.warning(
+                    #     f"[UNCORRELATION SYSTEM] Пропуск: {symbol} ({exchange_1}, {exchange_2}) "
+                    #     f"price1={price1}, price2={price2}"
+                    # )
+                    continue
+
                 try:
+                    price1 = float(price1)
+                    price2 = float(price2)
+                except (ValueError, TypeError) as error:
+                    # self.logger.error(
+                    #     f"[UNCORRELATION SYSTEM] Невалидные данные: {symbol} ({exchange_1}, {exchange_2}), {error}"
+                    # )
+                    continue
 
-                    price1 = float(exchanges[exchange_1]['price'])
-                    price2 = float(exchanges[exchange_2]['price'])
-                except Exception as error:
-                    self.logger.error(f'[UNCORRLEATION SYSTEM] Ошибка прайсов - {symbol}, {error}')
-                    print(f'{symbol}, exchange - {exchanges[exchange_1]}, data - {exchanges[exchange_1]['price']}')
-                    print(f'{symbol}, exchange - {exchanges[exchange_2]}, data - {exchanges[exchange_2]['price']}')
-
-                if price2 == 0 or price1 == 0:
+                if price1 == 0 or price2 == 0:
                     continue
 
                 spread = self.calculator.calc_spread(price1, price2)
-                self.spreads.setdefault(symbol, {})[f'{exchange_1}-{exchange_2}'] = spread
+                self.spreads.setdefault(symbol, {})[f"{exchange_1}-{exchange_2}"] = spread
 
     async def _get_valid_spreads(self):
         self.valid_spreads.clear()

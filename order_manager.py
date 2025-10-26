@@ -1,69 +1,123 @@
 import asyncio
+from decimal import Decimal
+
 
 class Order_manager:
-    def __init__(self, logger, cache_manager):
+    def __init__(
+            self,
+            logger,
+            cache_manager,
+            order_funcs
+            ):
         self.logger = logger
         self.cache_manager = cache_manager
+        self.order_funcs = {
+            "binance": order_funcs['binance'],
+            "bitget": order_funcs['bitget'], 
+            "okx": order_funcs['okx'],
+            "bybit": None,
+            "gate": None,
+        }
 
-    async def make_operation(self, order_data: dict):
-        """Главная точка входа для всех операций"""
-        stage = order_data['stage']
+    async def make_operation(
+            self,
+            order_data: dict
+            ):
+        stage = order_data.get("stage")
 
-        if stage == 'enter':
-            await self.make_enter_step(order_data)
-        elif stage == 'exit':
-            await self.make_exit_step(order_data)
+        if stage == "enter":
+            await self._execute_pair_orders(
+                order_data,
+                buy_ex=order_data["buy_exchange"],
+                sell_ex=order_data["sell_exchange"],
+                stage_name="Вход",
+            )
+        elif stage == "exit":
+            await self._execute_pair_orders(
+                order_data,
+                buy_ex=order_data["buy_exchange"],
+                sell_ex=order_data["sell_exchange"],
+                stage_name="Выход",
+            )
         else:
             raise ValueError(f"[ORDER SYSTEM] Неизвестный stage: {stage}")
 
-    async def make_enter_step(self, order_data: dict):
-        """Вход в позицию: купить на дешёвой, продать на дорогой"""
-        await self._execute_pair_orders(
+    async def _execute_pair_orders(
+            self,
             order_data,
-            buy_ex=order_data['buy_exchange'],
-            sell_ex=order_data['sell_exchange'],
-            stage_name="Вход"
-        )
-
-    async def make_exit_step(self, order_data: dict):
-        """Выход из позиции: купить на дорогой, продать на дешёвой"""
-        await self._execute_pair_orders(
-            order_data,
-            buy_ex=order_data['sell_exchange'],
-            sell_ex=order_data['buy_exchange'],
-            stage_name="Выход"
-        )
-
-    async def _execute_pair_orders(self, order_data, buy_ex, sell_ex, stage_name):
+            buy_ex,
+            sell_ex,
+            stage_name
+            ):
         """Общий метод для входа/выхода"""
-        pair_key = order_data['pair_key']
-        symbol = order_data['symbol']
-        volume = order_data['volume']
-        uncorrelation = order_data['uncorrelation']
-
         try:
             results = await asyncio.gather(
-                self.execute_buy_order(symbol=symbol, exchange=buy_ex, volume=volume),
-                self.execute_sell_order(symbol=symbol, exchange=sell_ex, volume=volume),
-                return_exceptions=True
+                self._execute_order(
+                    side=buy_ex["side"].upper(),
+                    order_data=order_data,
+                    exchange=buy_ex["exchange"],
+                    price=Decimal(str(buy_ex["price"])),
+                    posSide=buy_ex.get("posSide"),
+                ),
+                self._execute_order(
+                    side=sell_ex["side"].upper(),
+                    order_data=order_data,
+                    exchange=sell_ex["exchange"],
+                    price=Decimal(str(sell_ex["price"])),
+                    posSide=sell_ex.get("posSide"),
+                ),
+                return_exceptions=True,
             )
 
-            # Проверяем, не вернулось ли исключение
             for res in results:
                 if isinstance(res, Exception):
                     raise res
 
-            # self.logger.info(f"[ORDER SYSTEM] {stage_name} шаг {pair_key} "
-            #                  f"- {uncorrelation} | {volume} {symbol} "
-            #                  f"(buy {buy_ex}, sell {sell_ex})")
-
         except Exception as error:
-            self.logger.error(f"[ORDER SYSTEM] Ошибка при {stage_name} {pair_key}: {error}")
+            self.logger.error(
+                f"[ORDER SYSTEM] Ошибка при {stage_name} {order_data['pair_key']}: {error}"
+            )
 
-    async def execute_buy_order(self, symbol, exchange, volume):
-        """Заглушка: тут будет вызов API биржи"""
-        self.logger.info(f"[ORDER SYSTEM] BUY {symbol} на {exchange} - {volume}")
+    async def _execute_order(
+            self,
+            side,
+            order_data,
+            exchange,
+            price,
+            posSide
+            ):
+        """Универсальный метод для buy/sell"""
+        symbol = order_data["symbol"]
+        volume = order_data["volume"]
+        func = self.order_funcs.get(exchange)
+        price = Decimal(price)
 
-    async def execute_sell_order(self, symbol, exchange, volume):
-        """Заглушка: тут будет вызов API биржи"""
-        self.logger.info(f"[ORDER SYSTEM] SELL {symbol} на {exchange} - {volume}")
+        if func is None:
+            self.logger.warning(
+                f"[ORDER SYSTEM] {side} {symbol} на {exchange} пока не реализован"
+            )
+            return
+
+        try:
+            result = await func(
+                side=side,
+                symbol=symbol,
+                volume=volume,
+                price=price,
+                posSide=posSide,
+            )
+
+
+            if result is None:
+                # self.logger.warning(f'[ORDER SYSTEM] Ордер на {exchange} не выполнен: {symbol}')
+                return result
+            else:
+                self.logger.info(
+                    f"[ORDER SYSTEM] {side} {symbol} на {exchange} - {volume}, "
+                    f'response - {result}'
+                )
+        except Exception as e:
+            self.logger.error(
+                f"[ORDER SYSTEM] Ошибка {side} {symbol} на {exchange}: {e}"
+            )
+            raise

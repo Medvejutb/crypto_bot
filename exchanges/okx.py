@@ -35,7 +35,16 @@ class WS_okx:
         self.SECRET_KEY = os.getenv('OKX_SECRET_KEY')
         self.PASSPHRASE = os.getenv('OKX_PASSPHRASE')
         self.session = None
-
+    
+    async def ping_task(self, websocket):
+        while True:
+            try:
+                await websocket.send(json.dumps({"op": "ping"}))
+                # self.logger.debug("[OKX SOCKET] Ping → серверу")
+            except Exception as e:
+                self.logger.error(f"[OKX SOCKET] Пинг сдох: {e}")
+                break
+            await asyncio.sleep(20)  # OKX рекомендует <=30 сек
 
     async def start_socket(self, queue):
 
@@ -46,7 +55,9 @@ class WS_okx:
 
         while True:
             try:
-                async with websockets.connect(self.url_4_prices, ping_interval=25, ping_timeout=10) as websocket:
+                async with websockets.connect(self.url_4_prices, ping_interval=None) as websocket:
+
+                    asyncio.create_task(self.ping_task(websocket))
 
                     self.connection = True
 
@@ -88,7 +99,7 @@ class WS_okx:
                         price = data.get('last')
                         ts = data.get('ts')
 
-                        if not price or not ts:
+                        if price in ('', None):
                             continue
 
                         self.data[symbol] = self.data.get(symbol, {})
@@ -144,28 +155,37 @@ class WS_okx:
 
 
     async def get_funding_4_cur_symbols(self, symbol: str) -> dict:
-        """ Получает funding rate и время следующего фандинга по символу """
         try:
-            instId = symbol.removesuffix('USDT') + '-USDT-SWAP'
+            instId = f"{symbol.replace('USDT', '')}-USDT-SWAP"
             url = f'https://www.okx.com/api/v5/public/funding-rate?instId={instId}'
 
             async with self.session.get(url) as response:
                 data = await response.json()
                 if data.get('code') != '0' or not data.get('data'):
                     return {}
-                funding = float(data['data'][0]['fundingRate']) * 100
-                next_time = int(data['data'][0]['nextFundingTime'])
-                
-                funding_dict = {}
-                funding_dict[symbol] = {
-                    'funding': funding,
-                    'next_funding_time': next_time,
+
+                record = data['data'][0]
+                funding_raw = record.get('fundingRate')
+                next_time_raw = record.get('nextFundingTime')
+
+                if not funding_raw or not next_time_raw:
+                    self.logger.warning(f"[OKX WARNING] У {symbol} funding или nextFundingTime пустые → скипаем")
+                    return {}
+
+                funding = float(funding_raw) * 100
+                next_time = int(next_time_raw)
+
+                return {
+                    symbol: {
+                        'funding': funding,
+                        'next_funding_time': next_time,
+                    }
                 }
-                return funding_dict
 
         except Exception as error:
             self.logger.error(f'[OKX ERROR] REST фандинг по {symbol} сдох: {error}')
             return {}
+
 
     def get_prices_data(self):
         return self.data
@@ -173,14 +193,17 @@ class WS_okx:
     async def _usd_to_contracts(
         self,
         instId: str,
-        usd_count: Decimal,
+        volume: Decimal,
+        price:Decimal,
         ):
+
+        usd_count = volume
+
         try:
             symbol = self.instId_map[instId]
             ctVal = Decimal(str(self.data[symbol]['ctVal'])) #Decimal(data[0]['ctVal'])
             lotSz = Decimal(str(self.data[symbol]['lotSz'])) #Decimal(data[0]['lotSz'])
             minSz = Decimal(str(self.data[symbol]['minSz']))
-            price = Decimal(str(self.data[symbol]['price']))
             sz = Decimal(str(usd_count)) / (price * ctVal)
             size = (sz // lotSz) * lotSz
             if size < minSz:
@@ -207,25 +230,33 @@ class WS_okx:
     
     async def place_order(
         self,
-        instId: str,
+        symbol: str,
         side: str,
-        usd_count: Decimal,
+        posSide: str,
+        volume: Decimal,
+        price: Decimal,
         ):
-
-        if not '-USDT-SWAP' in instId:
-            instId = instId + '-USDT-SWAP'
+        instId = symbol.removesuffix('USDT') + '-USDT-SWAP'
 
         timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+        usd_count = volume
+
         size = await self._usd_to_contracts(
             instId=instId,
-            usd_count=usd_count
+            volume=usd_count,
+            price=price,
         )
+        if size is None:
+            return None
+        print('OKX POSSDIE')
+        print(posSide)
 
         body = json.dumps({
             "instId": instId,
             "tdMode": "cross",
-            "side": side,
+            "side": side.lower(),
+            # "posSide": posSide, # long / short
             "ordType": "market",
             "sz": size
         })
@@ -243,41 +274,9 @@ class WS_okx:
             headers=headers,
             data=body,
         ) as response:
-            return await response.json()
+            response = await response.json()
+            return response
 
 
-async def main():
-    logging.basicConfig(level=logging.DEBUG)
-    logger = logging.getLogger("TEST_OKX")
 
-    # Заглушка кэша
-    class DummyCache:
-        async def set_price(self, *args, **kwargs):
-            pass
-
-    cache = DummyCache()
-
-    # создаём экземпляр WS_okx
-    okx = WS_okx(logger, cache)
-
-    # подтягиваем символы
-    await okx.get_symbols()
-
-    pprint(okx.instId_map)
-
-    # Выбираем инструмент, который реально есть
-    instId = "A-USDT-SWAP"
-    symbol = okx.instId_map[instId]
-
-    # Ставим цену вручную, чтобы расчёт контракта прошёл
-    okx.data[symbol]['price'] = 25000.0  # или актуальная цена
-
-    # Отправляем ордер один раз
-    resp = await okx.place_order(instId=instId, side="buy", usd_volume=10)
-    print("Ответ от OKX:", resp)
-
-    await okx.session.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
 

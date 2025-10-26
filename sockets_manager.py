@@ -37,6 +37,13 @@ class Sockets_manager:
             'bybit': self.bybit.get_funding_4_cur_symbols,
             # 'gate': self.gate.get_funding_4_cur_symbols
         }
+        self.order_funcs = {
+            "binance": self.binance.place_order,
+            "bitget": self.bitget.place_order,
+            "okx": self.okx.place_order,
+            "bybit": None,
+            "gate": None,
+        }
 
 
     async def start_all_sockets(self, queue):

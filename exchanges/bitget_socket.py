@@ -2,6 +2,14 @@ import asyncio
 import aiohttp
 import websockets
 import json
+from decimal import Decimal, ROUND_DOWN
+from dotenv import load_dotenv
+import hmac
+import hashlib
+import base64
+import time
+import os
+from pprint import pprint
 
 
 
@@ -13,15 +21,21 @@ class WS_bitget:
         self.symbols = []
         self.data = {'stock': 'bitget'}
         self.ready = False
-        self.url_4_prices = 'wss://ws.bitget.com/v2/ws/public'
-        self.url_4_symbols = "https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES"
-        self.url_4_symbols_next_funding = 'https://api.bitget.com/api/v2/mix/market/funding-time?symbol='
+        self.url_socket = 'wss://ws.bitget.com/v2/ws/public'
+        self.api_base_market = 'https://api.bitget.com/api/v2/mix/market/'
+        self.url_order = "https://api.bitget.com/api/mix/v1/order/placeOrder"
         self.connection = False
+        self.session = aiohttp.ClientSession()
+        self.symbols_info_4_order = {}
+        load_dotenv()
+        self.API_KEY = os.getenv('BITGET_API_KEY')
+        self.SECRET_KEY = os.getenv('BITGET_SECRET_KEY')
+        self.PASSWORD = os.getenv('BITGET_PASSWORD')
 
     async def ping_loop(self, websocket):
         while True:
             try:
-                await websocket.send(json.dumps({"op": "ping"}))
+                await websocket.send("ping")
                 await asyncio.sleep(20)
             except Exception as e:
                 self.logger.error(f"[BITGET PING ERROR] {e}")
@@ -44,7 +58,7 @@ class WS_bitget:
         while True:
             try:
                 async with websockets.connect(
-                        self.url_4_prices,
+                        self.url_socket,
                         ping_interval=None,
                         close_timeout=5
                 ) as websocket:
@@ -59,6 +73,10 @@ class WS_bitget:
 
                     while True:
                         msg = await websocket.recv()
+
+                        if msg == "pong":
+                            continue
+
                         message = json.loads(msg)
                         if message.get('event') == 'subscribe':
                             continue
@@ -90,29 +108,46 @@ class WS_bitget:
                 self.logger.error(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 2 секунды')
                 await asyncio.sleep(2)
             finally:
-                ping_task.cancel()
+                if 'ping_task' in locals():
+                    ping_task.cancel()
 
     async def get_symbols(self):
         while True:
             try:
-                self.logger.debug('[BITGET] Сбор символов из REST API')
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(self.url_4_symbols) as response:
-                        data = await response.json()
+                async with self.session.get(
+                    f'{self.api_base_market}tickers?productType=USDT-FUTURES'
+                ) as response:
+                    data = await response.json()
+                    self.symbols = []
+                    for item in data['data']:
+                        symbol = item.get('symbol')
+                        last_price = item.get('lastPr')
+                        if symbol and last_price and float(last_price) > 0:
+                            self.symbols.append(symbol)
 
-                        self.symbols = []
-
-                        for item in data['data']:
-                            symbol = item.get('symbol')
-                            last_price = item.get('lastPr')
-
-                            if symbol and last_price and float(last_price) > 0:
-                                self.symbols.append(symbol)
-
-                return
+                break
             except Exception as error:
-                self.logger.error(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 5 сек')
-                await asyncio.sleep(5)
+                self.logger.error(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 1 сек')
+                await asyncio.sleep(1)
+
+        while True:
+            try:
+                async with self.session.get(
+
+                    f'{self.api_base_market}'
+                    f'contracts?productType=USDT-FUTURES'
+                    
+                    ) as response:
+                    raw = await response.json()
+                    data = raw['data']
+                    for item in data:
+                        symbol = item['symbol']
+                        self.symbols_info_4_order.setdefault(symbol, item)
+                        # pprint(self.symbols_info_4_order)
+                    break
+            except Exception as error:
+                self.logger.error(f'[BITGET ERROR] Ошибка при сборе инфы символов для ордеров - {error}. Повтор через 1 сек')
+                await asyncio.sleep(1)
                 
 
     def get_prices_data(self):
@@ -128,30 +163,174 @@ class WS_bitget:
         :return: dict с ключами: funding, next_funding_time
         """
         self.logger.debug(f'[BITGET SYSTEM] Получение фандинга по {symbol}')
-        funding_url = f'https://api.bitget.com/api/v2/mix/market/current-fundRate?symbol={symbol}&productType=usdt-futures'
-        time_url = f'https://api.bitget.com/api/v2/mix/market/funding-time?symbol={symbol}&productType=usdt-futures'
 
         while True:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(funding_url) as funding_response:
-                        funding_data = await funding_response.json()
-                        funding = float(funding_data['data']['fundingRate']) * 100
+                async with self.session.get(
 
-                    async with session.get(time_url) as time_response:
-                        time_data = await time_response.json()
-                        next_time = int(time_data['data'][0]['nextFundingTime'])
-                        
-                    funding_dict = {}
-                    funding_dict[symbol] = {
-                        'funding': funding,
-                        'next_funding_time': next_time,
-                    }
+                    f'{self.api_base_market}'
+                    f'current-fundRate?symbol={symbol}&productType=usdt-futures'
+                    
+                    ) as funding_response:
 
-                    return funding_dict
+                    funding_data = await funding_response.json()
+                    funding = float(funding_data['data']['fundingRate']) * 100
+                
+                async with self.session.get(
+
+                    f'{self.api_base_market}'
+                    f'funding-time?symbol={symbol}&productType=usdt-futures'
+
+                ) as time_response:
+                    time_data = await time_response.json()
+                    next_time = int(time_data['data'][0]['nextFundingTime'])
+                    
+                funding_dict = {}
+                funding_dict[symbol] = {
+                    'funding': funding,
+                    'next_funding_time': next_time,
+                }
+                return funding_dict
             except Exception as error:
                 self.logger.error(f'[BITGET ERROR] Ошибка при получении фандинга по {symbol} - {error}. Повтор через 5 сек')
                 await asyncio.sleep(5)
+
+    def _timestamp(
+            self
+    ):
+        return str(int(time.time() * 1000))
+
+    def convert_usd_to_contracts(self,
+                        symbol: str,
+                        usd_volume: Decimal,
+                        price: Decimal,
+                        ):
+        try:
+            price = Decimal(str(price))
+
+            if symbol not in self.symbols_info_4_order.keys():
+                self.logger.info(
+                    f'[BITGET SYSTEM] Символ {symbol} не торгуется'
+                )
+                return None
+
+            contract_info = self.symbols_info_4_order[symbol]
+            sizeMultiplier = Decimal(str(contract_info['sizeMultiplier']))
+            usd_volume = Decimal(str(usd_volume))
+        except Exception as error:
+            self.logger.error(
+                f'[BITGET SYSTEM] Ошибка в конвертации USD в контракты - возможно не найден символ: {error}'
+                )
+            return None
+
+        try:
+            minTradeNum = Decimal(contract_info['minTradeNum'])
+            volumePlace = Decimal(contract_info['volumePlace'])
+            minTradeNum = Decimal(contract_info['minTradeNum'])
+            print(sizeMultiplier)
+            
+            contract_value = price * sizeMultiplier
+            print(contract_value)
+            contracts_count = usd_volume / contract_value
+            print(contracts_count)
+
+            contracts_count = contracts_count.quantize(volumePlace, rounding=ROUND_DOWN)
+            print(contracts_count)
+
+            if contracts_count < minTradeNum:
+                self.logger.warning(
+                    f"[BITGET SYSTEM] Объём {contracts_count} контрактов ({usd_volume} USD) слишком мал для {symbol}, минималка {minTradeNum} контрактов"
+                )
+                return None
+            
+            return str(contracts_count)
+        
+        except Exception as error:
+            self.logger.error(f'[BITGET SYSTEM] Ошибка в конвертации USD в контракты - {error}')
+            return None
+        
+    def _sign(
+        self,
+        timestamp,
+        method,
+        request_path,
+        body,
+        secret_key,
+    ):
+        query = ""
+        pre_sign = f"{timestamp}{method.upper()}{request_path}{body}"
+        sign = hmac.new(
+            secret_key.encode("utf-8"),
+            pre_sign.encode("utf-8"),
+            hashlib.sha256).digest()
+        return base64.b64encode(sign).decode()
+    
+    def _headers(
+        self,
+        method,
+        path,
+        body,
+    ):
+        ts = self._timestamp()
+        return {
+            "ACCESS-KEY": self.API_KEY,
+            "ACCESS-SIGN": self._sign(ts, method, path, body, self.SECRET_KEY),
+            "ACCESS-TIMESTAMP": ts,
+            "ACCESS-PASSPHRASE": self.PASSWORD,
+            "Content-Type": "application/json",
+        }
+
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        volume: Decimal,
+        price: Decimal,
+        posSide: str,
+    ):
+
+        usd_count = volume
+        request_path = "/api/mix/v1/order/placeOrder"
+        method = 'POST'
+        # pricePrecision = Decimal(contract_info['pricePrecision'])
+        # UMCBL_name = contract_info['symbol']
+
+        size = self.convert_usd_to_contracts(
+            symbol=symbol,
+            usd_volume=usd_count,
+            price=price,
+        )
+        if size is None:
+            return None
+
+        symbol =f'{symbol}_UMCBL'
+
+        body = {
+            "symbol": symbol,
+            "marginCoin": "USDT",
+            "size": size,
+            "side": f'{side.lower()}_single',
+            "orderType": "market",
+        }
+
+        body_str = json.dumps(body, separators=(",", ":"))
+        
+        headers = self._headers(
+            method=method,
+            path=request_path,
+            body=body_str,
+        )
+        
+        async with self.session.post(
+            self.url_order,
+            headers=headers,
+            data=body_str
+        ) as response:
+            response = await response.json(content_type=None)
+            return response
+
+
+        
 
 
 
