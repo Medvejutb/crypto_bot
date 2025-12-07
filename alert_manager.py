@@ -58,15 +58,17 @@ class Alert_manager:
             for symbol, data in message_dict.items():
                 try:
                     message_text.append("\n".join([
-                        f"{symbol} | РАСКОРРЕЛЯЦИЯ: {data['difference']:.2f}%",
-                        f"🔺 Цена выше на {data['higher_exchange']}: {smart_round(data['higher_price'])}",
-                        f"🔻 Цена ниже на {data['lower_exchange']}: {smart_round(data['lower_price'])}",
-                        f"📊 {data['higher_exchange']}: price -> {smart_round(data['higher_price'])}, funding -> {smart_round(float(data['higher_funding']))}, {data['higher_next']}",
-                        f"📊 {data['lower_exchange']}: price -> {smart_round(data['lower_price'])}, funding -> {smart_round(float(data['lower_funding']))}, {data['lower_next']}",
+                        f"{symbol} | РАСКОРРЕЛЯЦИЯ: {float(data['difference']):.2f}%",
+                        f"🔺 Цена выше на {data['higher_exchange']}: {smart_round(float(data['higher_price']))}",
+                        f"🔻 Цена ниже на {data['lower_exchange']}: {smart_round(float(data['lower_price']))}",
+                        f"📊 {data['higher_exchange']}: funding -> {smart_round(float(data['higher_funding']))}, {data['higher_next']}",
+                        f"📊 {data['lower_exchange']}: funding -> {smart_round(float(data['lower_funding']))}, {data['lower_next']}",
                         f"__________________________"
                     ]))
                 except TypeError as typeerror:
                     self.logger.worning(f'Какая то неведомая хуйня пролезла в данные: {typeerror}')
+                except Exception as error:
+                    self.logger.error(f'[ALERT MANAGER] Ошибка - {error}')
             message_text = self._check_and_split_msg(message_text)
             for text in message_text:
                 text = '\n'.join(text)

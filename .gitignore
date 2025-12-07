@@ -1,4 +1,5 @@
 .logs
+.venv
 .venv/lib64
 *.py[cod]
 .env

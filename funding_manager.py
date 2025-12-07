@@ -21,7 +21,7 @@ class Funding_manager:
             exchange: {} for exchange in self.exchanges_fundings_only_api # держит время, когда фандинг должен обновиться
             }
     
-    async def get_fundings_for_cur_symbols_with_stocks(self, stock_symbol_list: list):
+    async def get_fundings(self, stock_symbol_list: list):
 
         ready_fundings = {}
 
@@ -50,73 +50,17 @@ class Funding_manager:
                     funding = funding_from_cache
                     next_funding_time = await self.cache_manager.get_next_funding_time(symbol, exchange)
             except TypeError as error:
-                self.logger.error(f'[FUNDING SYSTEM] {symbol}')
+                self.logger.error(f'[FUNDING SYSTEM] {symbol} - {error}')
             except Exception as error:
-                self.logger.error(f'[FUNDING SYSTEM] {symbol}')
+                self.logger.error(f'[FUNDING SYSTEM] {symbol} - {error}')
             ready_fundings[key] = {
                 'funding': funding,
                 'next_funding_time': next_funding_time
             }
 
-        # if ready_fundings:
-        #     pprint(ready_fundings)
         return ready_fundings
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    async def start_work(self, funding_queue):
-        while True:
-            try:
-                data = await funding_queue.get()
-            except Exception as e:
-                self.logger.exception(f'[FUNDING SYSTEM] Ошибка async очереди {e}')
-            try:
-                if data:
-                    symbol = data['symbol']
-                    exchange = data['exchange']
-                    if exchange in self.exchanges_fundings_only_api:
-
-                        if not self.last_update_time_funding[exchange][symbol] or time.time() > self.next_time_to_update_funding[exchange][symbol]:
-
-                            self.logger.debug(f'[FUNDING] Обработка {symbol} с {exchange}')
-                            func = self.funding_funcs[exchange]
-                            funding_data = await func(symbol)
-                            self.logger.debug(f'[FUNDING] Данные получены c {exchange} - {symbol}: {funding_data}')
-
-                            self.last_update_time_funding[exchange][symbol] = time.time()
-
-                            if funding_data and symbol in funding_data:
-
-                                funding = funding_data[symbol]['funding']
-                                next_funding_time = funding_data[symbol]['next_funding_time']
-                                await self.cache_manager.set_funding(
-                                    symbol,
-                                    exchange,
-                                    funding,
-                                    next_funding_time
-                                )
-                            else:
-                                self.logger.warning(f'[FUNDING SYSTEM] Нет данных для {symbol} на {exchange}')
-
-                        
-                await asyncio.sleep(0.5)
-
-            except Exception as error:
-                self.logger.exception(f'[FUNDING SYSTEM] Ошибка обработки данных {error}')
+    def is_fundings_times_same(self, next_time1, next_time2) -> bool:
+        if not next_time1 == next_time2:
+            return False
+        return True

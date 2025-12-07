@@ -26,22 +26,25 @@ sockets_manager = Sockets_manager(logger=logger, cache_manager=cache_manager)
 
 position_and_alert_queue = asyncio.Queue()
 
-uncorrelation_manager = Uncorrelation_manager(
-        logger=logger,
-        cache_manager=cache_manager,
-        bot=bot,
-        chat_id=config.CHAT_ID,
-        interval=config.CHECK_INTERVAL,
-        exchanges=config.EXCHANGES,
-        spread=config.SPREAD
-        )
-
 funding_manager = Funding_manager(
     logger=logger,
     cache_manager=cache_manager,
     funding_funcs=sockets_manager.stocks_fundings_funcs,
     time_live_funding=config.TIME_LIVE_FUNDING_IN_MEMORY,
     )
+
+uncorrelation_manager = Uncorrelation_manager(
+        logger=logger,
+        cache_manager=cache_manager,
+        funding_manager=funding_manager,
+        bot=bot,
+        chat_id=config.CHAT_ID,
+        interval=config.CHECK_INTERVAL,
+        exchanges=config.EXCHANGES,
+        spread=config.SPREAD,
+        get_raw_sockets_data=sockets_manager.get_prices_from_exchanges,
+        sockets_ready_event=sockets_manager.sockets_ready_event,
+        )
 
 alert_manager = Alert_manager(
     logger=logger,
@@ -55,6 +58,7 @@ order_manager = Order_manager(
     cache_manager=cache_manager,
     logger=logger,
     order_funcs=sockets_manager.order_funcs,
+    order_conf=config.ORDER_CONF,
 )
 
 positions_dispatcher = Position_dispatcher(
@@ -82,12 +86,7 @@ async def ws_worker(queue):
 
 async def uncorrelation_worker(funding_queue):
     logger.success('[UNCORRELATION SYSTEM] Запуск расчетов раскорреляций')
-    await uncorrelation_manager.start_work(
-        sockets_event=sockets_manager.sockets_ready_event,
-        funding_queue=funding_queue,
-        sockets_data=sockets_manager.get_prices_from_exchanges,
-        get_fundings=funding_manager.get_fundings_for_cur_symbols_with_stocks
-        )
+    await uncorrelation_manager.start_work()
 
 
 async def alert_worker(sockets_event):
@@ -104,18 +103,25 @@ async def positions_worker():
 
 async def main():
 
+    await cache_manager.clear()
+    await asyncio.sleep(0.2)
+
     queue = asyncio.Queue()
     funding_queue = asyncio.Queue()
 
     asyncio.create_task(ws_worker(queue))
+    await asyncio.sleep(0.2)
 
     # asyncio.create_task(funding_worker())
 
     asyncio.create_task(uncorrelation_worker(funding_queue))
+    await asyncio.sleep(0.2)
 
     asyncio.create_task(alert_worker(sockets_event=sockets_manager.sockets_ready_event))
+    await asyncio.sleep(0.2)
 
     asyncio.create_task(positions_worker())
+    await asyncio.sleep(0.2)
 
     await tg_dispatcher.start_polling(bot)
 

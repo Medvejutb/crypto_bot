@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 import time
 from pprint import pprint
 
@@ -40,11 +41,11 @@ class Position_dispatcher:
                     for symbol, data in uncorrelations.items():
                         if symbol == 'COAIUSDT':
                             continue
-                        uncorrelation = data['difference']
+                        uncorrelation = Decimal(data['difference'])
                         higher_exchange = data['higher_exchange']
-                        higher_price = data['higher_price']
+                        higher_price = Decimal(data['higher_price'])
                         lower_exchange = data['lower_exchange']
-                        lower_price = data['lower_price']
+                        lower_price = Decimal(data['lower_price'])
                         key = (symbol, higher_exchange, lower_exchange)
 
                         if (
@@ -65,7 +66,7 @@ class Position_dispatcher:
                                 lower_price=lower_price,
                                 logger=self.logger,
                                 position_config=self.position_config,
-                                del_pos_func=lambda k=key: self.delete__position(k),
+                                del_pos_func=lambda k=key: self._delete__position(k),
                             )
 
                             asyncio.create_task(self.managers_dict[key].start_work())
@@ -78,11 +79,11 @@ class Position_dispatcher:
                             await self.cache_manager.add_active_position_symbol_pair(key)
                             await self.managers_dict[key].set_uncorrelation(uncorrelation)
                         
-                        # elif (
-                        #     key in self.managers_dict and self.managers_dict[key].position_state_for_dispatcher == 'cancel' or
-                        #     key in self.managers_dict and self.managers_dict[key].position_state_for_dispatcher == 'close'
-                        #     ):
-                        #     self.delete__position(key=key)
+                        elif (
+                            key in self.managers_dict and self.managers_dict[key].position_state_for_dispatcher == 'cancel' or
+                            key in self.managers_dict and self.managers_dict[key].position_state_for_dispatcher == 'close'
+                            ):
+                            self._delete__position(key=key)
 
 
                 except Exception as error:
@@ -90,7 +91,7 @@ class Position_dispatcher:
 
             await asyncio.sleep(0.5)
 
-    async def delete__position(self, key):
+    async def _delete__position(self, key):
         if key in self.managers_dict:
             await self.cache_manager.del_active_position_symbol_pair(key)
             del self.managers_dict[key]

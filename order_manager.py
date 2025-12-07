@@ -7,7 +7,8 @@ class Order_manager:
             self,
             logger,
             cache_manager,
-            order_funcs
+            order_funcs,
+            order_conf,
             ):
         self.logger = logger
         self.cache_manager = cache_manager
@@ -18,6 +19,7 @@ class Order_manager:
             "bybit": None,
             "gate": None,
         }
+        self.conf = order_conf
 
     async def make_operation(
             self,
@@ -26,19 +28,23 @@ class Order_manager:
         stage = order_data.get("stage")
 
         if stage == "enter":
-            await self._execute_pair_orders(
+            execute = await self._execute_pair_orders(
                 order_data,
                 buy_ex=order_data["buy_exchange"],
                 sell_ex=order_data["sell_exchange"],
                 stage_name="Вход",
             )
+            if execute:
+                return True
         elif stage == "exit":
-            await self._execute_pair_orders(
+            execute = await self._execute_pair_orders(
                 order_data,
                 buy_ex=order_data["buy_exchange"],
                 sell_ex=order_data["sell_exchange"],
                 stage_name="Выход",
             )
+            if execute:
+                return True
         else:
             raise ValueError(f"[ORDER SYSTEM] Неизвестный stage: {stage}")
 
@@ -72,6 +78,7 @@ class Order_manager:
             for res in results:
                 if isinstance(res, Exception):
                     raise res
+            return True
 
         except Exception as error:
             self.logger.error(
@@ -91,6 +98,12 @@ class Order_manager:
         volume = order_data["volume"]
         func = self.order_funcs.get(exchange)
         price = Decimal(price)
+
+        if self.conf.get('fake_order'):
+            self.logger.info(
+                f"[ORDER SYSTEM] FAKE FAKE {side} {symbol} на {exchange} - {volume} FAKE FAKE"
+            )
+            return True
 
         if func is None:
             self.logger.warning(

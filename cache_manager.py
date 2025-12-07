@@ -23,6 +23,9 @@ class Cache_manager:
             decode_responses=True, encoding="utf-8"
         )
     
+    @cache_guard
+    async def clear(self):
+        await self.r.flushall()
 
     @cache_guard
     async def get_all_symbols(self):
@@ -154,11 +157,11 @@ class Cache_manager:
     # -------------ACTIVE_SYMBOL_PAIRS_IN_POSITIONS-------------#
 
     @cache_guard
-    async def add_active_position_symbol_pair(self, key: set):
+    async def add_active_position_symbol_pair(self, key):
         raw = await self.r.get("ACTIVE_POS_PAIR")
         combos = json.loads(raw) if raw else []
 
-        new_combo = sorted(key)
+        new_combo = list(key)
 
         if new_combo not in combos:
             combos.append(new_combo)
@@ -172,8 +175,8 @@ class Cache_manager:
             return None
 
         combos = json.loads(raw)
-        return [tuple(sorted(c)) for c in combos]
-    
+        return [tuple(c) for c in combos]
+
     @cache_guard
     async def del_active_position_symbol_pair(self, key: tuple):
         raw = await self.r.get("ACTIVE_POS_PAIR")
@@ -181,7 +184,7 @@ class Cache_manager:
             return
 
         combos = json.loads(raw)
-        target = list(sorted(key))
+        target = list(key)
 
         if target in combos:
             combos.remove(target)

@@ -25,7 +25,7 @@ class WS_bitget:
         self.api_base_market = 'https://api.bitget.com/api/v2/mix/market/'
         self.url_order = "https://api.bitget.com/api/mix/v1/order/placeOrder"
         self.connection = False
-        self.session = aiohttp.ClientSession()
+        self.session = None
         self.symbols_info_4_order = {}
         load_dotenv()
         self.API_KEY = os.getenv('BITGET_API_KEY')
@@ -40,8 +40,11 @@ class WS_bitget:
             except Exception as e:
                 self.logger.error(f"[BITGET PING ERROR] {e}")
                 return
+    async def open_client(self):
+        self.session = aiohttp.ClientSession()
 
     async def start_socket(self):
+        await self.open_client()
         await self.get_symbols()
 
         subscribe_settings = {

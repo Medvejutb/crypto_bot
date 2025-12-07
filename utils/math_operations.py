@@ -1,47 +1,37 @@
 import asyncio
+from decimal import Decimal
 import config
 from utils.normalization import join_stocks_to_dict
+
+
+D100 = Decimal('100')
+D2 = Decimal('2')
 
 
 class Calculator:
     def __init__(self):
         pass
 
-    def calc_uncorrelation(self, stock1, stock2, stock_name1, stock_name2):
+    def calc_uncorrelation(self, stock1, stock2, exch1, exch2, active_pos=False):
         try:
-            higher_price, lower_price = None, None
-            higher_exchange, lower_exchange = None, None
-            higher_funding, lower_funding = None, None
-            higher_next, lower_next = None, None
+            higher, lower = (stock1, stock2) if stock1['price'] >= stock2['price'] else (stock2, stock1)
+            spread = self.calc_spread(higher['price'], lower['price'])
 
-            if stock1['price'] >= stock2['price']:
-                higher_price, lower_price = stock1['price'], stock2['price']
-                higher_exchange, lower_exchange = stock_name1, stock_name2
-                higher_funding, lower_funding = stock1['funding'], stock2['funding']
-                higher_next, lower_next = stock1['next_funding_time'], stock2['next_funding_time']
-            else:
-                higher_price, lower_price = stock2['price'], stock1['price']
-                higher_exchange, lower_exchange = stock_name2, stock_name1
-                higher_funding, lower_funding = stock2['funding'], stock1['funding']
-                higher_next, lower_next = stock2['next_funding_time'], stock1['next_funding_time']
+            if abs(spread) < Decimal(str(config.UNCORRELATION_PARA)) and not active_pos:
+                return None
 
-            middle_price = (higher_price + lower_price) / 2
-            spread = (higher_price - lower_price) / middle_price * 100
+            return {
+                'difference': str(spread),
+                'higher_price': str(higher['price']),
+                'lower_price': str(lower['price']),
+                'higher_exchange': exch1 if higher == stock1 else exch2,
+                'lower_exchange': exch1 if lower == stock1 else exch2,
+                'higher_next': str(higher.get('next_funding_time')),
+                'lower_next': str(lower.get('next_funding_time')),
+                'higher_funding': str(higher.get('funding')),
+                'lower_funding': str(lower.get('funding')),
+            }
 
-            if abs(spread) >= config.UNCORRELATION_PARA:
-                return {
-                    'difference': spread,
-                    'higher_price': higher_price,
-                    'lower_price': lower_price,
-                    'higher_exchange': higher_exchange,
-                    'lower_exchange': lower_exchange,
-                    'higher_next': higher_next,
-                    'lower_next': lower_next,
-                    'higher_funding': higher_funding,
-                    'lower_funding': lower_funding,
-                }
-
-            return None
         except Exception as e:
             print(f'[ERROR] При расчёте раскорреляции: {e}')
             return None
@@ -56,10 +46,11 @@ class Calculator:
             price_1 = data[stock_name1]['price']
             price_2 = data[stock_name2]['price']
 
-            spread = ((price_1 - price_2) / price_2) * 100
+            spread = (price_1 - price_2) / price_2 * D100   # Decimal
 
             treshold[symbol] = spread
 
+        return treshold
+
     def calc_spread(self, price_1, price_2):
-        spread = ((price_1 - price_2) / price_2) * 100
-        return spread
+        return (price_1 - price_2) / price_2 * D100

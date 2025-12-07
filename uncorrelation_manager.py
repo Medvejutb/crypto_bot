@@ -1,4 +1,6 @@
 import asyncio
+from dataclasses import dataclass, field
+from decimal import Decimal
 import json
 import time
 from itertools import combinations
@@ -6,13 +8,64 @@ from pprint import pprint
 
 from utils.math_operations import Calculator
 
+@dataclass(slots=True)
+class Symbol:
+    """
+    TODO: 
+    - Есть варик добавить поле с биржами, которые уже учавствую в позиции,
+    и инструменты для работы с этим говном
+    """
+    symbol: str
+    exchanges: dict = field(default_factory=lambda: {
+        'binance': None,
+        'bitget': None,
+        'okx': None,
+        'bybit': None
+    })
+    spreads: dict[str, Decimal] = field(default_factory=dict)
+
+@dataclass(slots=True)
+class Symbol_exchange_data:
+    symbol: str
+    exchange: str
+    price: Decimal = None
+    funding: Decimal = None
+    next_funding_time: Decimal = None
+
+@dataclass(slots=True)
+class Context:
+    """
+    TODO: Возможно следует добавить функцию для очистки контекста
+    """
+    raw_sockets_data: dict = None
+    best_spreads:dict = None
+    uncorrelations: dict = None
+    active_pos_symbols: list = None
+
+    def clear(self):
+        self.raw_sockets_data = {}
+        self.best_spreads = {}
+        self.uncorrelations = {}
+        self.active_pos_symbols = []
+
 
 class Uncorrelation_manager:
     def __init__(
-        self, logger, cache_manager, bot, chat_id, interval, exchanges, spread
+        self,
+        logger,
+        cache_manager,
+        funding_manager,
+        bot,
+        chat_id,
+        interval,
+        exchanges,
+        spread,
+        get_raw_sockets_data,
+        sockets_ready_event,
     ):
         self.logger = logger
         self.cache_manager = cache_manager
+        self.funding_manager = funding_manager
         self.uncorrelations_list = []
         self.calculator = Calculator()
         self.bot = bot
@@ -20,274 +73,238 @@ class Uncorrelation_manager:
         self.interval = interval
         self.exchanges = exchanges
         self.conf_spread = spread
-        self.exchanges_data = {}
-        self.spreads = {}
-        self.valid_spreads = {}
-        self.best_spreads = {}
-        self.positions_symbols_pair = []
-        self.valid_fundings = {}
-        self.ready_fundings = {}
-        self.uncorrelation_dict = {}
+
+        self.symbols_data = {}
+        self.context = Context()
+        self.pipeline_steps = [
+            self._process_raw_data,
+            self._get_spreads,
+            self._get_best_spread,
+            self._update_fundings_for_best_spreads,
+            self._set_uncorrelation,
+        ]
+
+        self.get_raw_func = get_raw_sockets_data
+        '''
+        Формат высера из sockets_data:
+            'AAVEUSDT': {'binance': {'funding': None,
+                                    'next_funding_time': None,
+                                    'price': 165.72,
+                                    'time': 1763919928111},
+                        'bitget': {'funding': -0.0072,
+                                    'next_funding_time': '1763942400000',
+                                    'price': '165.56',
+                                    'time': '1763919928467'},
+                        'bybit': {'price': 165.57, 'time': 1763919928781},
+                        'okx': {'ctVal': '0.1',
+                                'funding': None,
+                                'instId': 'AAVE-USDT-SWAP',
+                                'lotSz': '0.1',
+                                'minSz': '0.1',
+                                'next_funding_time': None,
+                                'price': 165.56,
+                                'time': 1763919928833}},
+        '''
+        self.sockets_is_ready = sockets_ready_event
+
         self.uncorrelations_event = asyncio.Event()
 
+    async def _process_raw_data(self, context):
+        """
+        Обработка сырых данных с сокетов.
 
-    async def start_work(self, sockets_event, funding_queue, sockets_data, get_fundings):
+        Создания объекта нового символа, в котором хранятся еще несколько
+        объектов под каждую биржу. Если символ или биржа символа уже существует,
+        то будет просто обновление.
+                
+        Прайсы и фандинги сразу оборачиваются в Децимал, чтобы дальше
+        с этим говном можно было проводить математические операции.
+        """
+        raw = context.raw_sockets_data
 
-        await sockets_event.wait()
+        for symbol, exchanges in raw.items():
 
-        self.exchanges_data.clear()
-        self.spreads.clear()
-        self.valid_spreads.clear()
-        
-        while True:
-            # Собираем все символы и их прайсы в один ебаный self.exchanges_data
-            await self._collect_symbols_with_prices_to_dict(sockets_data=sockets_data)
-
-            # получаем спреды между всеми биржами символов в self.spreads = {}
-            await self._get_spreads()
-
-            # пиздим валидные спреды в self.best_spreads = {}
-            await self._get_valid_spreads()  # {'KNCUSDT': [('binance', 'bybit', 0.5438859714928758),
-                                             #              ('binance', 'bitget', 0.5438859714928758)]}
-                                             # {'AVLUSDT': [('bitget', 'bybit', 0.8955223880597022)],
-                                             #  'KNCUSDT': [('binance', 'bybit', 0.5438859714928758),
-                                             #              ('binance', 'bitget', 0.5438859714928758)]}
-
-
-            # и теперь лучшие спреды
-            to_funding_spreads = await self._get_best_spreads()   # {'BANANAS31USDT': ('binance', 'bitget', 0.6283176253927067),
-                                                                  #  'KNCUSDT': ('bitget', 'binance', -0.7030527289546763),
-                                                                  #  'NTRNUSDT': ('bybit', 'bitget', 0.5020080321285145)}
-
-            await self._get_fundings_for_best_spreads(funding_queue, to_funding_spreads, get_fundings)
-
-            await self._get_ready_funding_pair()
-
-            symbols_with_prices_and_fundings = self.build_symbols_with_prices_and_fundings(
-                self.best_spreads,
-                self.ready_fundings,
-                self.exchanges_data
-            )
-
-
-            uncorrelations = await self._get_uncorrelations(symbols_with_prices_and_fundings)
-            self.uncorrelations_list = uncorrelations
-
-            if self.uncorrelations_list:
-                self.uncorrelations_event.set()
-
-            await asyncio.sleep(0.5)
-
-    async def _collect_symbols_with_prices_to_dict(self, sockets_data):
-        symbols_set = await self.cache_manager.get_all_symbols()
-        sockets_data_dict = sockets_data()
-
-        for symbol in symbols_set:
-            if symbol not in sockets_data_dict:
+            if symbol == 'stock':
                 continue
 
-            for exchange in self.exchanges:
-                price_info = sockets_data_dict[symbol].get(exchange)
-                if price_info is None:
+            if symbol not in self.symbols_data:
+                self.symbols_data[symbol] = Symbol(
+                    symbol=symbol,
+                )
+            
+            symbol_obj = self.symbols_data.get(symbol)
+
+            for exchange, data in exchanges.items():
+
+                price = data.get('price')
+                funding = data.get('funding')
+                nft = data.get('next_funding_time')
+
+                if symbol_obj.exchanges.get(exchange) is None:
+
+                    symbol_obj.exchanges[exchange] = Symbol_exchange_data(
+                        symbol=symbol,
+                        exchange=exchange,
+                    )
+
+                symbol_exch_obj = symbol_obj.exchanges.get(exchange)
+
+                if price is not None:
+                    symbol_exch_obj.price = Decimal(str(price))
+
+                if funding is not None:
+                    symbol_exch_obj.funding = Decimal(str(funding))
+
+                if nft is not None:
+                    symbol_exch_obj.next_funding_time = Decimal(nft)
+
+    async def _get_active_pos_symbol(self):
+        """
+        Собирает из кэша актуальные пары, которые учавствуют в позициях
+        и обновляет self.active_pos_symbols
+        """
+        active_pos_symbols = await self.cache_manager.get_active_position_symbol_pairs() or []
+        return active_pos_symbols
+
+    async def _get_spreads(self, context):
+        """
+        Получение новых разниц в прайсах в специальный дикт.
+
+        Это говно проходится по всем символам всех бирж.
+
+        Формат хранения разниц:
+
+        key = tuple(sorted([symbol, higher_exchange, lower_exchange]))
+
+        {
+            key: int,
+        }
+        """
+        for symbol_obj in self.symbols_data.values():
+            exchanges = list(symbol_obj.exchanges.values())
+            for exch1, exch2 in combinations(exchanges, 2):
+
+                if exch1 is None or exch2 is None:
                     continue
 
-                self.exchanges_data.setdefault(symbol, {})[exchange] = {
-                    'price': price_info['price'],
-                    'time': price_info.get('time', time.time())
-                }
-
-
-
-    async def _get_spreads(self):
-        for symbol, exchanges in self.exchanges_data.items():
-            for exchange_1, exchange_2 in combinations(exchanges, 2):
-
-                price1 = exchanges[exchange_1].get('price')
-                price2 = exchanges[exchange_2].get('price')
-
-                # фильтр на None, пустые строки и нули
-                if not price1 or not price2:
-                    # self.logger.warning(
-                    #     f"[UNCORRELATION SYSTEM] Пропуск: {symbol} ({exchange_1}, {exchange_2}) "
-                    #     f"price1={price1}, price2={price2}"
-                    # )
-                    continue
-
-                try:
-                    price1 = float(price1)
-                    price2 = float(price2)
-                except (ValueError, TypeError) as error:
-                    # self.logger.error(
-                    #     f"[UNCORRELATION SYSTEM] Невалидные данные: {symbol} ({exchange_1}, {exchange_2}), {error}"
-                    # )
-                    continue
+                price1 = exch1.price
+                price2 = exch2.price
 
                 if price1 == 0 or price2 == 0:
                     continue
+                if price1 is None or price2 is None:
+                    continue
 
-                spread = self.calculator.calc_spread(price1, price2)
-                self.spreads.setdefault(symbol, {})[f"{exchange_1}-{exchange_2}"] = spread
+                spread = self.calculator.calc_spread(
+                    price_1=price1,
+                    price_2=price2,
+                )
+                key = tuple(sorted((exch1.exchange, exch2.exchange)))
+                symbol_obj.spreads[key] = spread       
 
-    async def _get_valid_spreads(self):
-        self.valid_spreads.clear()
-        active_pairs = await self.cache_manager.get_active_position_symbol_pairs() or []
+    async def _get_best_spread(self, context):
+        active_pos_symbols = await self._get_active_pos_symbol()
+        context.active_pos_symbols = active_pos_symbols
+        if active_pos_symbols: pprint(active_pos_symbols)
 
-        for symbol, data in self.spreads.items():
-            for stock_pair, spread_value in sorted(data.items(), key=lambda x: -abs(x[1])):
-                exch1, exch2 = stock_pair.split('-')
-                key = tuple(sorted([symbol, exch1, exch2]))
+        for symbol_obj in self.symbols_data.values():
+            best_spread = None
+            best_key = None
 
-                if abs(spread_value) >= self.conf_spread or key in active_pairs:
-                    self.valid_spreads.setdefault(symbol, []).append((exch1, exch2, spread_value))
+            for key, spread in sorted(symbol_obj.spreads.items(), key=lambda x: -abs(x[1])):
+                exch1, exch2 = key
+                global_key = (symbol_obj.symbol, *sorted([exch1, exch2]))
 
+                if global_key in active_pos_symbols:
+                    best_spread = spread
+                    best_key = key
+                    break
 
-    async def _get_best_spreads(self):
-        self.best_spreads.clear()
-        to_return = {}
-        self.positions_symbols_pair = await self.cache_manager.get_active_position_symbol_pairs() or []
+                if abs(spread) >= self.conf_spread and best_spread is None:
+                    best_spread = spread
+                    best_key = key
 
-        for symbol, spreads in self.valid_spreads.items():
+            if best_key:
+                context.best_spreads[(symbol_obj.symbol, *best_key)] = best_spread
 
-            exch1, exch2, spread_value = spreads[0]
-            
-            key = tuple(sorted([symbol, exch1, exch2]))
-            
-            if key in self.positions_symbols_pair:
-                best = (exch1, exch2, spread_value)
-            else:
-                best = max(spreads, key=lambda x: abs(x[2]))
-            
-            self.best_spreads[symbol] = best
-            to_return[symbol] = best
-            
-            
-        return to_return
+    async def _update_fundings_for_best_spreads(self, context):
 
-    async def _get_fundings_for_best_spreads(self, funding_queue, best_spreads_data, get_fundings):
+        key_list = []
 
-        keys_list = []
+        for key, value in context.best_spreads.items():
 
-        for symbol, (ex1, ex2, spread) in best_spreads_data.items():
-            for exch in (ex1, ex2):
+            symbol, exch1, exch2 = key
+
+            for exch in (exch1, exch2):
                 key = (symbol, exch)
-                keys_list.append(key)
+                key_list.append(key)
         
-        ready_fundings_from_funding_manager = await get_fundings(keys_list)
+        fundings_dict = await self.funding_manager.get_fundings(key_list)
 
-        if ready_fundings_from_funding_manager:
+
+        if fundings_dict:
         
-            for key, data in ready_fundings_from_funding_manager.items():
+            for key, data in fundings_dict.items():
                 symbol, exchange = key
-                funding = data['funding']
-                next_funding_time = data['next_funding_time']
+                funding = str(data['funding']) or None
+                next_funding_time = str(data['next_funding_time'])
 
-                self.valid_fundings.setdefault(symbol, {})[exchange] = {
-                    'funding': funding,
-                    'next_funding_time': next_funding_time
-                }
-    
-    async def _get_ready_funding_pair(self):
-        """
-        Фильтрует те символы, у которых есть фандинги с обеих бирж best_spreads.
-        """
-        self.ready_fundings.clear()  # Очищаем, чтобы не копилось старое дерьмо
+                self.symbols_data[symbol].exchanges[exchange].funding = Decimal(funding)
+                self.symbols_data[symbol].exchanges[exchange].next_funding_time = Decimal(next_funding_time)
 
-        for symbol, (ex1, ex2, _) in self.best_spreads.items():
-            symbol_fundings = self.valid_fundings.get(symbol)
-            if not symbol_fundings:
-                continue
-
-            if ex1 in symbol_fundings and ex2 in symbol_fundings:
-                self.ready_fundings[symbol] = {
-                    ex1: symbol_fundings[ex1],
-                    ex2: symbol_fundings[ex2],
-                }
-
-    def build_symbols_with_prices_and_fundings(self, best_spreads, ready_fundings, exchanges_data):
-        result = {}
-
-        for symbol, (ex1, ex2, _) in best_spreads.items():
-            funding_data = ready_fundings.get(symbol)
-            if not funding_data:
-                continue
-
-            result[symbol] = {}
-
-            for exch in (ex1, ex2):
-                exchange_funding = funding_data.get(exch)
-                price_data = exchanges_data.get(symbol, {}).get(exch)
-
-                if not exchange_funding or not price_data:
-                    continue
-
-                result[symbol][exch] = {
-                    'price': float(price_data.get('price', 0)),
-                    'time': int(price_data.get('time', 0)),
-                    'funding': exchange_funding.get('funding'),
-                    'next_funding_time': exchange_funding.get('next_funding_time')
-                }
-
-        return result
-
-
-    async def _get_uncorrelations(self, main_dict):
-
-        self.uncorrelation_dict = {}
+    async def _set_uncorrelation(self, context):
+        """Нахожу раскорреляции"""
         uncorrelation_dict = {}
+        for key, value in context.best_spreads.items():
+            symbol, exch1, exch2 = key
+            symbol_obj = self.symbols_data[symbol]
 
-        for symbol, exchanges in main_dict.items():
-            exchange_names = list(exchanges.keys())
+            exch1_obj = symbol_obj.exchanges[exch1]
+            exch2_obj = symbol_obj.exchanges[exch2]
 
-            if len(exchange_names) < 2:
+            funding1 = exch1_obj.funding
+            funding2 = exch2_obj.funding
+
+            if funding1 is None or funding2 is None:
+                continue
+            
+            if not self.funding_manager.is_fundings_times_same(
+                exch1_obj.next_funding_time,
+                exch2_obj.next_funding_time
+            ):
                 continue
 
-            best_uncorrelation = None
-            best_pair = None
-            best_diff = -float("inf")
-
-            for ex1, ex2 in combinations(exchange_names, 2):
-                data1 = exchanges[ex1]
-                data2 = exchanges[ex2]
-
-                if not data1 or not data2:
-                    continue
-
-                if 'price' not in data1 or 'funding' not in data1:
-                    continue
-                if 'price' not in data2 or 'funding' not in data2:
-                    continue
-
-                stock1 = {
-                    'price': data1['price'],
-                    'funding': data1['funding'],
-                    'next_funding_time': data1.get('next_funding_time'),
-                    'time': data1.get('time')
-                }
-
-                stock2 = {
-                    'price': data2['price'],
-                    'funding': data2['funding'],
-                    'next_funding_time': data2.get('next_funding_time'),
-                    'time': data2.get('time')
-                }
-
-                result = self.calculator.calc_uncorrelation(stock1, stock2, ex1, ex2)
-
-                if result and result.get('difference', 0) > best_diff:
-                    best_diff = result['difference']
-                    best_uncorrelation = result
-                    best_pair = (ex1, ex2)
-
-            if best_uncorrelation:
-                uncorrelation_dict[symbol] = best_uncorrelation
-
-        self.uncorrelation_dict = uncorrelation_dict
+            stock1 = {
+                'price': exch1_obj.price,
+                'funding': exch1_obj.funding,
+                'next_funding_time': exch1_obj.next_funding_time,
+            }
+            stock2 = {
+                'price': exch2_obj.price,
+                'funding': exch2_obj.funding,
+                'next_funding_time': exch2_obj.next_funding_time,
+            }
+            
+            result = self.calculator.calc_uncorrelation(
+                stock1,
+                stock2,exch1,
+                exch2,
+                active_pos=True if key in context.active_pos_symbols else False)
+            if result:
+                uncorrelation_dict[symbol] = result
+                self.uncorrelations_event.set()
+            
         await self.cache_manager.set_uncor(uncorrelation_dict)
-        return uncorrelation_dict
 
-    
-    def get_uncorrelations(self):
-        if self.uncorrelation_dict:
-            return self.uncorrelation_dict
-        else:
-            return None
+    async def start_work(self):
+        await self.sockets_is_ready.wait()
+
+        while True:
+
+            self.context.clear()
+            self.context.raw_sockets_data = self.get_raw_func()
+
+            for step in self.pipeline_steps:
+                await step(context=self.context)
+            await asyncio.sleep(0.5)
+
