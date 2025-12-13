@@ -43,7 +43,6 @@ class Funding_manager:
                     funding_data = await func(symbol)
                     funding = funding_data[symbol]['funding']
                     next_funding_time = funding_data[symbol]['next_funding_time']
-                    # self.logger.debug(f'[FUNDING] Данные получены c {exchange} - {symbol}: {funding_data}')
                     await self.cache_manager.set_funding(symbol, exchange, funding, next_funding_time)           
                     self.blacklist_for_symbols_with_stocks[key] = 'ok'
                 else:

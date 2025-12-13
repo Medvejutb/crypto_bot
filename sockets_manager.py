@@ -4,9 +4,7 @@ from exchanges.bitget_socket import WS_bitget
 from exchanges.okx import WS_okx
 from exchanges.bybit_socket import WS_bybit
 from exchanges.gate_socket import WS_gate
-from itertools import combinations
 from utils.math_operations import Calculator
-import config
 from pprint import pprint
 
 

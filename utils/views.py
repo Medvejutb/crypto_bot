@@ -1,5 +1,5 @@
 from loguru import logger as _logger
-from config import MODE
+from config_file import MODE
 import sys
 
 class Logging_manager:

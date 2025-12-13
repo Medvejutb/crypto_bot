@@ -77,11 +77,7 @@ class WS_binance:
     def get_prices_data(self):
         return self.data
 
-    def _check_WTF(self, msg):
-        pass
-
     async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
-        # self.logger.debug('[BINANCE SYSTEM] Прямой сбор фандингов с API без кэша')
         funding_dict = {}
 
         try:
@@ -127,15 +123,12 @@ class WS_binance:
                 if not symbol_data:
                     self.logger.error(f"[BINANCE ORDER] Нет данных по символу {symbol}")
                     return None
-
-                # кэшируем
                 self.symbols_order_info[symbol] = symbol_data
         else:
             symbol_data = self.symbols_order_info[symbol]
     
         filters = symbol_data["filters"]
     
-        # для маркетов приоритетнее MARKET_LOT_SIZE
         lot_size = next((f for f in filters if f["filterType"] == "MARKET_LOT_SIZE"), None)
         if lot_size is None:
             lot_size = next(f for f in filters if f["filterType"] == "LOT_SIZE")
@@ -155,7 +148,6 @@ class WS_binance:
     
         qty = usd_amount / price
     
-        # округляем вниз до кратности stepSize
         step = stepSize.normalize()
         qty = (qty // step) * step
     
@@ -188,9 +180,6 @@ class WS_binance:
         **kwargs
     ):
         """
-        ПЕРЕПИСАТЬ НАХУЙ ВСЁ
-
-
         Размещает маркет-ордер на Binance Futures.
         symbol – инструмент, например 'BTCUSDT'
         side – 'BUY' или 'SELL'
@@ -200,7 +189,6 @@ class WS_binance:
 
         usd_count = volume
 
-        # считаем размер в контрактах
         quantity_size = await self._usd_to_contracts(
             usd_amount=usd_count,
             price=price,
@@ -231,28 +219,3 @@ class WS_binance:
         except Exception as e:
             self.logger.error(f"[BINANCE ORDER] Запрос сдох: {e}")
             return None
-
-
-
-
-
-
-
-
-def get_coins_with_status_TRADING() -> list:
-    url_4_symbol = 'https://fapi.binance.com/fapi/v1/exchangeInfo'
-    response = requests.get(url_4_symbol)
-    data = response.json()
-    coins_list = []
-
-    for item in data['symbols']:
-        if (item.get('status') == 'TRADING'
-            and item.get('contractType') == 'PERPETUAL'
-            and item.get('quoteAsset') == 'USDT'
-        ):
-            coins_list.append(item.get('symbol'))
-
-    with open('binance_symbols.json', 'w') as file:
-        json.dump(coins_list, file, indent=4, ensure_ascii=False)
-
-get_coins_with_status_TRADING()

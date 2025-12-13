@@ -3,7 +3,7 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 
-import config
+import config_file
 import position_config
 from alert_manager import Alert_manager
 from cache_manager import Cache_manager
@@ -14,7 +14,7 @@ from uncorrelation_manager import Uncorrelation_manager
 from utils.views import Logging_manager
 from order_manager import Order_manager
 
-bot = Bot(token=config.BOT_TOKEN)
+bot = Bot(token=config_file.BOT_TOKEN)
 
 tg_dispatcher = Dispatcher()
 
@@ -30,7 +30,7 @@ funding_manager = Funding_manager(
     logger=logger,
     cache_manager=cache_manager,
     funding_funcs=sockets_manager.stocks_fundings_funcs,
-    time_live_funding=config.TIME_LIVE_FUNDING_IN_MEMORY,
+    time_live_funding=config_file.TIME_LIVE_FUNDING_IN_MEMORY,
     )
 
 uncorrelation_manager = Uncorrelation_manager(
@@ -38,10 +38,10 @@ uncorrelation_manager = Uncorrelation_manager(
         cache_manager=cache_manager,
         funding_manager=funding_manager,
         bot=bot,
-        chat_id=config.CHAT_ID,
-        interval=config.CHECK_INTERVAL,
-        exchanges=config.EXCHANGES,
-        spread=config.SPREAD,
+        chat_id=config_file.CHAT_ID,
+        interval=config_file.CHECK_INTERVAL,
+        exchanges=config_file.EXCHANGES,
+        spread=config_file.SPREAD,
         get_raw_sockets_data=sockets_manager.get_prices_from_exchanges,
         sockets_ready_event=sockets_manager.sockets_ready_event,
         )
@@ -49,8 +49,8 @@ uncorrelation_manager = Uncorrelation_manager(
 alert_manager = Alert_manager(
     logger=logger,
     bot=bot,
-    chat_id=config.CHAT_ID,
-    interval=config.CHECK_INTERVAL,
+    chat_id=config_file.CHAT_ID,
+    interval=config_file.CHECK_INTERVAL,
     cache_manager=cache_manager,
     )
 
@@ -58,7 +58,7 @@ order_manager = Order_manager(
     cache_manager=cache_manager,
     logger=logger,
     order_funcs=sockets_manager.order_funcs,
-    order_conf=config.ORDER_CONF,
+    order_conf=config_file.ORDER_CONF,
 )
 
 positions_dispatcher = Position_dispatcher(
@@ -66,6 +66,7 @@ positions_dispatcher = Position_dispatcher(
     order_manager=order_manager,
     logger=logger,
     position_config=position_config,
+    alert_queue=alert_manager.pos_queue,
     )
 
 
@@ -90,8 +91,9 @@ async def uncorrelation_worker(funding_queue):
 
 
 async def alert_worker(sockets_event):
-    await alert_manager.start_alerting(
-        sockets_event=sockets_event)
+    await alert_manager.run(
+        sockets_event=sockets_event
+        )
     
 
 async def positions_worker():
@@ -111,8 +113,6 @@ async def main():
 
     asyncio.create_task(ws_worker(queue))
     await asyncio.sleep(0.2)
-
-    # asyncio.create_task(funding_worker())
 
     asyncio.create_task(uncorrelation_worker(funding_queue))
     await asyncio.sleep(0.2)

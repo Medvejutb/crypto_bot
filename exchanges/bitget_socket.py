@@ -159,6 +159,10 @@ class WS_bitget:
 
     async def get_funding_4_cur_symbols(self, symbol: str) -> dict:
         """
+        TODO:
+        Ошибка при получении фандинга по LINEAUSDT - 'NoneType' object is not subscriptable
+
+
         Получает funding rate и next funding time по одному символу с Bitget API.
         Без кэша. Только жёсткий API.
 

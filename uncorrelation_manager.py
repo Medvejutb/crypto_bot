@@ -34,9 +34,6 @@ class Symbol_exchange_data:
 
 @dataclass(slots=True)
 class Context:
-    """
-    TODO: Возможно следует добавить функцию для очистки контекста
-    """
     raw_sockets_data: dict = None
     best_spreads:dict = None
     uncorrelations: dict = None
@@ -205,7 +202,7 @@ class Uncorrelation_manager:
     async def _get_best_spread(self, context):
         active_pos_symbols = await self._get_active_pos_symbol()
         context.active_pos_symbols = active_pos_symbols
-        if active_pos_symbols: pprint(active_pos_symbols)
+        # if active_pos_symbols: pprint(active_pos_symbols)
 
         for symbol_obj in self.symbols_data.values():
             best_spread = None

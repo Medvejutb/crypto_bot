@@ -1,6 +1,6 @@
 import asyncio
-from decimal import Decimal
-import config
+from decimal import Decimal, ROUND_HALF_UP
+import config_file
 from utils.normalization import join_stocks_to_dict
 
 
@@ -17,7 +17,7 @@ class Calculator:
             higher, lower = (stock1, stock2) if stock1['price'] >= stock2['price'] else (stock2, stock1)
             spread = self.calc_spread(higher['price'], lower['price'])
 
-            if abs(spread) < Decimal(str(config.UNCORRELATION_PARA)) and not active_pos:
+            if abs(spread) < Decimal(str(config_file.UNCORRELATION_PARA)) and not active_pos:
                 return None
 
             return {
@@ -54,3 +54,27 @@ class Calculator:
 
     def calc_spread(self, price_1, price_2):
         return (price_1 - price_2) / price_2 * D100
+
+    @staticmethod
+    def smart_round(price: Decimal) -> Decimal:
+        if price is None:
+            return price
+
+        try:
+            dec = Decimal(str(price))
+
+            if dec > Decimal("100"):
+                q = Decimal("1")
+            elif dec > Decimal("1"):
+                q = Decimal("0.01")
+            elif dec > Decimal("0.01"):
+                q = Decimal("0.001")
+            else:
+                q = Decimal("0.000001")
+
+            return dec.quantize(q, rounding=ROUND_HALF_UP)
+
+        except Exception as e:
+            print("\n=== СУКА, ОШИБКА В ОКРУГЛЕНИИ ===")
+            print(f"Объект: {price}, Ошибка: {e}")
+            return price

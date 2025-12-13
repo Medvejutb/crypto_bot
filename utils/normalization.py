@@ -1,38 +1,3 @@
-from datetime import datetime
-
-def smart_round(price: float) -> str:
-
-    try:
-
-        if price is None:
-            return price
-
-        if float(price) > 100:
-            return f"{price:.0f}"
-        elif float(price) > 1:
-            return f"{price:.2f}"
-        elif float(price) > 0.01:
-            return f"{price:.3f}"
-        else:
-            return f"{price:.6f}"
-    except Exception as error:
-        print('++++++++++===========++++++++++++===========+++++++++++++++================')
-        print(f'Ошибка в функции округления чисел - объект: {price},Ошибка: {error}')
-
-
-def get_human_time(future):
-    if future is None:
-        return future
-    future_dt = datetime.fromtimestamp(int(future) / 1000)
-    now = datetime.now()
-    delta = future_dt - now
-
-    days = delta.days
-    hours, remainder = divmod(delta.seconds, 3600)
-    minutes, _ = divmod(remainder, 60)
-
-    return f"{days}д {hours}ч {minutes}м"
-
 def join_stocks_to_dict(stock1, stock2):
     data_coins = {}
     stock_name1 = stock1['stock']
@@ -63,27 +28,3 @@ def join_stocks_to_dict(stock1, stock2):
         print(f'[SYSTEM NORMALIZATION] Произошла ошибка в функции нормализации - {error}')
 
     return data_coins
-
-# def join_stocks_dicts_to_main_stocks_dict(best_spreads, ready_fundings, exchanges_data):
-#     main_stocks_dict = {}
-
-#     for symbol, (ex1, ex2, spread) in best_spreads.items():
-#         fundings = ready_fundings.get(symbol)
-#         if not fundings or ex1 not in fundings or ex2 not in fundings:
-#             continue
-
-#         main_stocks_dict[symbol] = {}
-
-#         for exch in (ex1, ex2):
-#             price_data = exchanges_data.get(symbol, {}).get(exch, {})
-#             funding = fundings.get(exch)
-
-#             main_stocks_dict[symbol][exch] = {
-#                 'price': float(price_data.get('price', 0)),
-#                 'time': int(price_data.get('time', 0)),
-#                 'funding': funding,
-#                 'next_funding_time': None
-#             }
-
-#     return main_stocks_dict
-

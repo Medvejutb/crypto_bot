@@ -1,6 +1,8 @@
 import asyncio
 from decimal import Decimal
 import time
+import msgspec
+from typing import Literal
 from pprint import pprint
 
 class Position_dispatcher:
@@ -9,6 +11,7 @@ class Position_dispatcher:
                 logger,
                 position_config,
                 order_manager,
+                alert_queue: asyncio.Queue,
                 ):
         self.managers_dict = {}
         self.cache_manager = cache_manager
@@ -16,6 +19,7 @@ class Position_dispatcher:
         self.order_manager = order_manager
         self.position_config = position_config
         self.max_count_positions = position_config.MAX_COUNT_POSITIONS
+        self.alert_queue = alert_queue
     
 
     async def start_working(self, uncorrelations_event):
@@ -67,6 +71,7 @@ class Position_dispatcher:
                                 logger=self.logger,
                                 position_config=self.position_config,
                                 del_pos_func=lambda k=key: self._delete__position(k),
+                                alert_queue=self.alert_queue
                             )
 
                             asyncio.create_task(self.managers_dict[key].start_work())
@@ -96,8 +101,28 @@ class Position_dispatcher:
             await self.cache_manager.del_active_position_symbol_pair(key)
             del self.managers_dict[key]
 
-            
+class Notification(msgspec.Struct):
+    """
+    Объект уведомления, который хранит данные о позиций:
+    - старт позиций
+    - шаг входа
+    - шаг выхода
+    - закрытие позиций
+    - прочие данные для контекста
 
+    TODO: Возможно стоит хранить значения с оригинальным типом данных
+    для передачи в alert_manager
+    """
+    alert_type: Literal['start', 'enter', 'exit', 'close']
+    symbol: str
+    uncorrelation: str
+    total_volume: str
+    sell_exch: str
+    buy_exch: str
+    total_steps: str
+    
+    part_volume: str | None = None
+    step: str | None = None
 
 class Position_manager:
     
@@ -115,10 +140,11 @@ class Position_manager:
             order_manager,
             position_config,
             del_pos_func,
+            alert_queue: asyncio.Queue,
             ):
         self.logger = logger
         self.order_manager = order_manager
-
+        self.alert_queue = alert_queue
 
         self.start_time = start_time
 
@@ -170,11 +196,6 @@ class Position_manager:
         if stock1 not in self.EXCHANGES_FOR_IN and stock2 not in self.EXCHANGES_FOR_IN:
             await self.del_pos_func(self.pair_key)
             return
-        # if stock1 == 'bitget' or stock2 == 'bitget':
-        #     self.logger.success('BITGET_BITGET_BITGET')
-        # else:
-        #     await self.del_pos_func(self.pair_key)
-        #     return
 
         self.logger.debug(f'[POSITION SYSTEM] Намёк на позицию, задержка перед стартом - {self.WAIT_POSITION}.'
                           f'Пара - {self.pair_key}')
@@ -194,6 +215,20 @@ class Position_manager:
         self.position_state_for_dispatcher = 'active'
 
         self.logger.success(f'[POSITION SYSTEM] {self.pair_key} - старт позиции ')
+
+        await self.alert_queue.put(
+            Notification(
+                alert_type='start',
+                symbol=self.symbol,
+                uncorrelation=self.uncorrelation_value,
+                total_volume=self.MONEY_VOLUME,
+                part_volume=self.money_for_one_step,
+                sell_exch=self.higher_exchange,
+                buy_exch=self.lower_exchange,
+                total_steps=self.STEP_COUNT,
+                step=None,
+            )
+        )
 
         while True:
 
@@ -267,6 +302,19 @@ class Position_manager:
                             f'[POSITION SYSTEM] Шаг входа - {self.pair_key}.'
                             f'Раскор - {self.uncorrelation_value}'
                             )
+                        await self.alert_queue.put(
+                            Notification(
+                                alert_type='enter',
+                                symbol=self.symbol,
+                                uncorrelation=self.uncorrelation_value,
+                                total_volume=self.MONEY_VOLUME,
+                                part_volume=self.money_for_one_step,
+                                sell_exch=self.higher_exchange,
+                                buy_exch=self.lower_exchange,
+                                step=self.enter_steps_done_count,
+                                total_steps=self.STEP_COUNT
+                            )
+                        )
 
                 elif is_exit:
 
@@ -311,11 +359,38 @@ class Position_manager:
                             f'[POSITION SYSTEM] Шаг выхода - {self.pair_key}.'
                             f'Раскор - {self.uncorrelation_value}'
                             )
+                        await self.alert_queue.put(
+                            Notification(
+                                alert_type='exit',
+                                symbol=self.symbol,
+                                uncorrelation=self.uncorrelation_value,
+                                total_volume=self.MONEY_VOLUME,
+                                part_volume=self.money_for_one_step,
+                                sell_exch=self.higher_exchange,
+                                buy_exch=self.lower_exchange,
+                                step=self.exit_steps_done_count,
+                                total_steps=self.STEP_COUNT
+                            )
+                        )
                         
 
                         if self.enter_steps_done_count == self.exit_steps_done_count:
                             self.position_state_for_dispatcher = 'close'
                             self.logger.success(f'[POSITION SYSTEM] {self.pair_key} - Позиция закрыта ')
+                            
+                            await self.alert_queue.put(
+                                Notification(
+                                    alert_type='close',
+                                    symbol=self.symbol,
+                                    uncorrelation=self.uncorrelation_value,
+                                    total_volume=self.MONEY_VOLUME,
+                                    part_volume=self.money_for_one_step,
+                                    sell_exch=self.higher_exchange,
+                                    buy_exch=self.lower_exchange,
+                                    step=None,
+                                    total_steps=self.STEP_COUNT
+                                )
+                            )
                             await self.del_pos_func(self.pair_key)
                             return
 
