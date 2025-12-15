@@ -1,0 +1,17 @@
+# virtualenv
+.venv/
+venv/
+
+# IDE
+.idea/
+
+# python
+__pycache__/
+*.py[cod]
+
+# env
+.env
+
+# logs
+logs/
+*.log

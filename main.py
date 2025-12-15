@@ -1,60 +1,129 @@
 import asyncio
+
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
-from controller import Controller
-import config
-from utils.normalization import join_stocks_dicts_to_main_stocks_dict
-from utils.normalization import smart_round
 
-bot = Bot(token=config.BOT_TOKEN)
-dp = Dispatcher()
+import config_file
+import position_config
+from alert_manager import Alert_manager
+from cache_manager import Cache_manager
+from funding_manager import Funding_manager
+from position_dispatcher import Position_dispatcher
+from sockets_manager import Sockets_manager
+from uncorrelation_manager import Uncorrelation_manager
+from utils.views import Logging_manager
+from order_manager import Order_manager
 
-ctrl = Controller()
+bot = Bot(token=config_file.BOT_TOKEN)
 
-@dp.message()
+tg_dispatcher = Dispatcher()
+
+logger = Logging_manager.get_logger()
+
+cache_manager = Cache_manager()
+
+sockets_manager = Sockets_manager(logger=logger, cache_manager=cache_manager)
+
+position_and_alert_queue = asyncio.Queue()
+
+funding_manager = Funding_manager(
+    logger=logger,
+    cache_manager=cache_manager,
+    funding_funcs=sockets_manager.stocks_fundings_funcs,
+    time_live_funding=config_file.TIME_LIVE_FUNDING_IN_MEMORY,
+    )
+
+uncorrelation_manager = Uncorrelation_manager(
+        logger=logger,
+        cache_manager=cache_manager,
+        funding_manager=funding_manager,
+        bot=bot,
+        chat_id=config_file.CHAT_ID,
+        interval=config_file.CHECK_INTERVAL,
+        exchanges=config_file.EXCHANGES,
+        spread=config_file.SPREAD,
+        get_raw_sockets_data=sockets_manager.get_prices_from_exchanges,
+        sockets_ready_event=sockets_manager.sockets_ready_event,
+        )
+
+alert_manager = Alert_manager(
+    logger=logger,
+    bot=bot,
+    chat_id=config_file.CHAT_ID,
+    interval=config_file.CHECK_INTERVAL,
+    cache_manager=cache_manager,
+    )
+
+order_manager = Order_manager(
+    cache_manager=cache_manager,
+    logger=logger,
+    order_funcs=sockets_manager.order_funcs,
+    order_conf=config_file.ORDER_CONF,
+)
+
+positions_dispatcher = Position_dispatcher(
+    cache_manager=cache_manager,
+    order_manager=order_manager,
+    logger=logger,
+    position_config=position_config,
+    alert_queue=alert_manager.pos_queue,
+    )
+
+
+
+
+@tg_dispatcher.message()
 async def get_id(message: Message):
     await message.answer(f"Твой айди\n{message.from_user.id}")
 
-async def background_worker():
-    await ctrl.start_all_sockets()
-    while True:
-        symbols_prices = ctrl.get_needed_symbols_with_prices()
-        symbols_fundings = await ctrl.get_fundings_for_symbols(symbols_prices)
-        main_dict = join_stocks_dicts_to_main_stocks_dict(symbols_prices, symbols_fundings)
-        uncorrelations = ctrl.get_uncorrelations(main_dict)
-        if uncorrelations:
-            print('====================СООБЩЕНИЕ БОТА=====================')
-            message_dict = uncorrelations
 
-            message_text = []
+async def ws_worker(queue):
+    logger.success('[WEBSOCKET SYSTEM] Запуск сокетов...')
+    await sockets_manager.start_all_sockets(queue=queue)
 
-            for symbol, data in message_dict.items():
-                message_text.append("\n".join([
-                    f"{symbol} | РАСКОРРЕЛЯЦИЯ: {data['difference']:.2f}%",
-                    f"🔺 Цена выше на {data['higher_exchange']}: {smart_round(data['higher_price'])}",
-                    f"🔻 Цена ниже на {data['lower_exchange']}: {smart_round(data['lower_price'])}",
-                    f"📊 {data['higher_exchange']}: price -> {smart_round(data['higher_price'])}, funding -> {smart_round(data['higher_funding'])}, {data['higher_next']}",
-                    f"📊 {data['lower_exchange']}: price -> {smart_round(data['lower_price'])}, funding -> {smart_round(data['lower_funding'])}, {data['lower_next']}",
-                    f"__________________________"
-                ]))
+# async def funding_worker():
+#     logger.success('[FUNDING SYSTEM] Запуск работы фандингов')
 
-            print(len(message_text))
-            message_text = ctrl.check_and_split_msg(message_text)
-            for text in message_text:
-                text = '\n'.join(text)
 
-                await bot.send_message(config.CHAT_ID, text)
+async def uncorrelation_worker(funding_queue):
+    logger.success('[UNCORRELATION SYSTEM] Запуск расчетов раскорреляций')
+    await uncorrelation_manager.start_work()
 
-            await bot.send_message(config.CHAT_ID, '==========КОНЕЦ СООБЩЕНИЯ==========')
 
-            await asyncio.sleep(config.CHECK_INTERVAL)
-        else:
-            print('====================СООБЩЕНИЕ БОТА ПУСТОЕ=====================')
-            await asyncio.sleep(5)
+async def alert_worker(sockets_event):
+    await alert_manager.run(
+        sockets_event=sockets_event
+        )
+    
+
+async def positions_worker():
+    logger.success('[POSITION SYSTEM] Запуск работы с позициями')
+    await positions_dispatcher.start_working(uncorrelation_manager.uncorrelations_event)
+
+
+
 
 async def main():
-    asyncio.create_task(background_worker())
-    await dp.start_polling(bot)
+
+    await cache_manager.clear()
+    await asyncio.sleep(0.2)
+
+    queue = asyncio.Queue()
+    funding_queue = asyncio.Queue()
+
+    asyncio.create_task(ws_worker(queue))
+    await asyncio.sleep(0.2)
+
+    asyncio.create_task(uncorrelation_worker(funding_queue))
+    await asyncio.sleep(0.2)
+
+    asyncio.create_task(alert_worker(sockets_event=sockets_manager.sockets_ready_event))
+    await asyncio.sleep(0.2)
+
+    asyncio.create_task(positions_worker())
+    await asyncio.sleep(0.2)
+
+    await tg_dispatcher.start_polling(bot)
 
 
 asyncio.run(main())
