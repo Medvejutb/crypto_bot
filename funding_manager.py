@@ -38,7 +38,6 @@ class Funding_manager:
                 continue
             try:
                 if funding_from_cache is None:
-                    # self.logger.debug(f'[FUNDING] Обработка {symbol} с {exchange}')
                     func = self.funding_funcs[exchange]
                     funding_data = await func(symbol)
                     funding = funding_data[symbol]['funding']

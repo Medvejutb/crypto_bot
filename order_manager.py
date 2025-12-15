@@ -93,7 +93,6 @@ class Order_manager:
             price,
             posSide
             ):
-        """Универсальный метод для buy/sell"""
         symbol = order_data["symbol"]
         volume = order_data["volume"]
         func = self.order_funcs.get(exchange)
@@ -122,13 +121,12 @@ class Order_manager:
 
 
             if result is None:
-                # self.logger.warning(f'[ORDER SYSTEM] Ордер на {exchange} не выполнен: {symbol}')
                 return result
-            else:
-                self.logger.info(
-                    f"[ORDER SYSTEM] {side} {symbol} на {exchange} - {volume}, "
-                    f'response - {result}'
-                )
+            # else:
+            #     self.logger.info(
+            #         f"[ORDER SYSTEM] {side} {symbol} на {exchange} - {volume}, "
+            #         f'response - {result}'
+            #     )
         except Exception as e:
             self.logger.error(
                 f"[ORDER SYSTEM] Ошибка {side} {symbol} на {exchange}: {e}"

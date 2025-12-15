@@ -23,7 +23,7 @@ class WS_bitget:
         self.ready = False
         self.url_socket = 'wss://ws.bitget.com/v2/ws/public'
         self.api_base_market = 'https://api.bitget.com/api/v2/mix/market/'
-        self.url_order = "https://api.bitget.com/api/mix/v1/order/placeOrder"
+        self.url_order = "https://api.bitget.com/api/v2/mix/order/place-order"
         self.connection = False
         self.session = None
         self.symbols_info_4_order = {}
@@ -234,15 +234,11 @@ class WS_bitget:
             minTradeNum = Decimal(contract_info['minTradeNum'])
             volumePlace = Decimal(contract_info['volumePlace'])
             minTradeNum = Decimal(contract_info['minTradeNum'])
-            print(sizeMultiplier)
             
             contract_value = price * sizeMultiplier
-            print(contract_value)
             contracts_count = usd_volume / contract_value
-            print(contracts_count)
 
             contracts_count = contracts_count.quantize(volumePlace, rounding=ROUND_DOWN)
-            print(contracts_count)
 
             if contracts_count < minTradeNum:
                 self.logger.warning(
@@ -264,7 +260,6 @@ class WS_bitget:
         body,
         secret_key,
     ):
-        query = ""
         pre_sign = f"{timestamp}{method.upper()}{request_path}{body}"
         sign = hmac.new(
             secret_key.encode("utf-8"),
@@ -295,54 +290,50 @@ class WS_bitget:
         price: Decimal,
         posSide: str,
     ):
+        try:
+            usd_count = volume
+            request_path = "/api/v2/mix/order/place-order"
+            method = 'POST'
 
-        usd_count = volume
-        request_path = "/api/mix/v1/order/placeOrder"
-        method = 'POST'
-        # pricePrecision = Decimal(contract_info['pricePrecision'])
-        # UMCBL_name = contract_info['symbol']
+            size = self.convert_usd_to_contracts(
+                symbol=symbol,
+                usd_volume=usd_count,
+                price=price,
+            )
+            if size is None:
+                return None
 
-        size = self.convert_usd_to_contracts(
-            symbol=symbol,
-            usd_volume=usd_count,
-            price=price,
-        )
-        if size is None:
-            return None
+            body = {
+                "symbol": symbol,
+                "productType": 'USDT-FUTURES',
+                "marginCoin": "USDT",
+                "marginMode": 'crossed',
+                "size": size,
+                "side": side.lower(),
+                "orderType": "market",
+            }
 
-        symbol =f'{symbol}_UMCBL'
-
-        body = {
-            "symbol": symbol,
-            "marginCoin": "USDT",
-            "size": size,
-            "side": f'{side.lower()}_single',
-            "orderType": "market",
-        }
-
-        body_str = json.dumps(body, separators=(",", ":"))
-        
-        headers = self._headers(
-            method=method,
-            path=request_path,
-            body=body_str,
-        )
-        
-        async with self.session.post(
-            self.url_order,
-            headers=headers,
-            data=body_str
-        ) as response:
-            response = await response.json(content_type=None)
-            return response
-
-
-        
-
-
-
-"""async def main():
-    suka = WS_bitget()
-    await suka.start_socket()
-
-asyncio.run(main())"""
+            body_str = json.dumps(body, separators=(",", ":"))
+            
+            headers = self._headers(
+                method=method,
+                path=request_path,
+                body=body_str,
+            )
+            
+            async with self.session.post(
+                self.url_order,
+                headers=headers,
+                data=body_str
+            ) as response:
+                response = await response.json(content_type=None)
+                if response.get('code') == '00000':
+                    self.logger.success(
+                        f'[BITGET ORDER]\n{side} {symbol} - ${volume}'
+                        )
+                return response
+        except Exception as error:
+            self.logger.error(
+                f'[BITGET ERROR]\n'
+                f'{symbol}\nError - {error}'
+                )

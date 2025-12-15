@@ -215,6 +215,10 @@ class WS_binance:
         try:
             async with self.session.post(url, headers=headers) as resp:
                 response = await resp.json()
+                if response.get('status') == "NEW":
+                    self.logger.success(
+                        f'[BINANCE ORDER]\n{side} {symbol} - ${volume}'
+                        )
                 return response
         except Exception as e:
             self.logger.error(f"[BINANCE ORDER] Запрос сдох: {e}")

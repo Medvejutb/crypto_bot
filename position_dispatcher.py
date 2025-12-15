@@ -299,7 +299,7 @@ class Position_manager:
                         self.enter_steps_done_count += 1
 
                         self.logger.info(
-                            f'[POSITION SYSTEM] Шаг входа - {self.pair_key}.'
+                            f'[POSITION SYSTEM] Шаг входа - {self.pair_key}. '
                             f'Раскор - {self.uncorrelation_value}'
                             )
                         await self.alert_queue.put(
@@ -356,7 +356,7 @@ class Position_manager:
                         self.exit_steps_done_count += 1
 
                         self.logger.info(
-                            f'[POSITION SYSTEM] Шаг выхода - {self.pair_key}.'
+                            f'[POSITION SYSTEM] Шаг выхода - {self.pair_key}. '
                             f'Раскор - {self.uncorrelation_value}'
                             )
                         await self.alert_queue.put(
