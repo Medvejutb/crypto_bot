@@ -33,12 +33,6 @@ class Position_dispatcher:
                 await asyncio.sleep(3)
                 continue
 
-            # for key in list(self.managers_dict.keys()):
-            #     if self.managers_dict[key].position_state_for_dispatcher == 'cancel':
-            #         del self.managers_dict[key]
-            #         await self.cache_manager.del_active_position_symbol_pair(key)
-            #         print(f'{key} DELETE')
-
             if uncorrelations:
 
                 try:

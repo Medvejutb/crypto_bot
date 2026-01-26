@@ -2,103 +2,139 @@ import asyncio
 import os
 import aiohttp
 import websockets
-import requests
 import json
 from decimal import Decimal, ROUND_DOWN
 import time
 import hmac
 import hashlib
 from dotenv import load_dotenv
+from models import SymbolExchange, Order_rules, Base_exchange
 from pprint import pprint
 
 load_dotenv()
 
-class WS_binance:
-    def __init__(self, logger, cache_manager):
-        self.logger = logger
-        self.cache_manager = cache_manager
-        self.symbols = []
-        self.symbols_order_info = {}
-        self.data = {'stock': 'binance'}
-        self.ready = False
-        self.url_4_prices = None
-        self.url_4_symbol = 'https://fapi.binance.com/fapi/v1/exchangeInfo'
-        self.connection = False
-        self.url_4_fundings = 'https://fapi.binance.com/fapi/v1/premiumIndex'
-        self.ready_event = asyncio.Event()
-        self.session = None
+class Binance_order_rules(Order_rules):
+    lot_size: Decimal | None = None
+    stepSize: Decimal | None = None
+    minQty: Decimal | None = None
+    min_notional: Decimal | None = None
+
+
+class Binance(Base_exchange):
+    name = 'binance'
+
+    def __init__(self, to_manager_queue):
+        super().__init__(to_manager_queue)
         self.API_KEY = os.getenv('BINANCE_API_KEY')
         self.SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
+        self.socket_url = 'wss://stream.binance.com:9443/stream?streams='
+        self.base_url = 'https://fapi.binance.com'
 
-    def load_symbols(self):
-        dir_path = os.path.dirname(os.path.realpath(__file__))
-        path = os.path.join(dir_path, 'binance_symbols.json')
-        with open(path, 'r') as file:
-            self.symbols = json.load(file)
-        self.url_4_prices = f"wss://stream.binance.com:9443/stream?streams={'/'.join([s.lower() + '@ticker' for s in self.symbols])}"
+    async def _ping_loop(self):
+        """
+        TODO: ping loop
+        """
+        pass
 
-    async def start_socket(self):
-        self.load_symbols()
-        self.session = aiohttp.ClientSession()
+    async def _get_symbols(self):
+        try:
+            sub_list = []
+            async with self.session.get(self.base_url + '/fapi/v1/premiumIndex') as response:
+                raw = await response.json()
+                for item in raw:
+                    symbol = item.get('symbol')
+                    self.symbols[symbol] = SymbolExchange(
+                        symbol=symbol,
+                        exchange=self.exchange_name,
+                        funding=Decimal(float(item.get('lastFundingRate', 0))) * 100,
+                        next_funding=int(item.get('nextFundingTime', 0)) / 1000,
+                        last_funding_update=int(item.get('time', 0)) / 1000,
+                        order_rules=None
+                    )
+                    sub_list.append(symbol)
+            streams = '/'.join([s.lower() + '@ticker' for s in sub_list])
+            self.socket_url = f"{self.socket_url}:9443/stream?streams={streams}"
+        except Exception as error:
+            self.logger.error(f'[BINANCE][SOCKET][ERROR]\n{error}')
+        
+        try:
+            async with self.session.get(self.base_url + '/fapi/v1/exchangeInfo') as response:
+                raw = await response.json()
+
+                for symbol_item in raw['symbols']:
+                    status = symbol_item['status'] == 'TRADING'
+                    contractType = symbol_item['contractType'] == 'PERPETUAL'
+                    if status and contractType:
+
+                        filters = symbol_item['filters']
+
+                        lot_size = next((f for f in filters if f["filterType"] == "MARKET_LOT_SIZE"), None)
+                        if not lot_size:
+                            lot_size = next(f for f in filters if f["filterType"] == "LOT_SIZE")
+
+                        notional_filter = next(f for f in filters if f["filterType"] == "MIN_NOTIONAL")
+
+                        order_rules = Binance_order_rules(
+                            symbol=symbol_item['symbol'],
+                            exchange='binance',
+                            stepSize=Decimal(lot_size['stepSize']),
+                            minQty=Decimal(lot_size['minQty']),
+                            min_notional=Decimal(notional_filter['notional'])
+                        )
+                        if symbol in self.symbols:
+                            self.symbols[symbol].order_rules = order_rules
+                        else:
+                            self.logger.warning('[BINANCE][WARNING]\nнет символа, но есть правила ордера')
+
+        except Exception as error:
+            self.logger.error(f'[BINANCE][SOCKET][ERROR]\n{error}')
+
+    async def run(self):
+        await self._get_symbols()
+        asyncio.create_task(self._wait_ready())
         while True:
             try:
-                async with websockets.connect(self.url_4_prices) as websocket:
+                async with websockets.connect(self.socket_url) as websocket:
                     self.connection = True
-                    self.logger.debug('[BINANCE SYSTEM] Соединение уставнолено')
+                    self.logger.debug('[BINANCE][SOCKET]\nСоединение уставнолено')
                     while True:
                         msg = await websocket.recv()
                         message = json.loads(msg)
                         data = message['data']
-                        self.data[data['s']] = {
-                            'price': float(data['c']),
-                            'funding': None,
-                            'next_funding_time': None,
-                            'time': int(data['E'])
-                        }
-
-                        if not self.ready and len(self.data) > 30:
-                            self.logger.success('[BINANCE SYSTEM] Данных достаточно. Биржа готова.')
-                            self.ready = True
-                            self.ready_event.set()
-                        
-                        await self.cache_manager.set_price(data['s'], 'binance', float(data['c']))
+                        symbol = data['s']
+                        price = Decimal(float(data['c']))
+                        self.symbols[symbol].price = price
+                        await self.to_manager_queue.put([self.symbols[symbol]])
 
             except Exception as error:
                 self.connection = False
-                self.logger.error(f'[BINANCE SYSTEM] Ошибка в сокете: {error}. Переподключаюсь через 5 секунд...')
+                self.logger.error(f'[BINANCE][SOCKET][ERROR]\nОшибка в сокете: {error}. Переподключаюсь через 5 секунд...')
                 await asyncio.sleep(5)
-
-    def check_connection(self):
-        if self.connection:
-            return True
-        else:
-            return None
-
-    def get_prices_data(self):
-        return self.data
-
-    async def get_funding_4_cur_symbols(self, symbols_list) -> dict:
-        funding_dict = {}
-
+    
+    async def get_funding(self, symbol: str) -> None:
+        """
+        Docstring для Binance.get_funding
+        
+        :param symbol: Символ, которому необходимо обновить фандинг
+        :type symbol: str
+        """
         try:
-            async with self.session.get(self.url_4_fundings) as response:
+            async with self.session.get(
+                self.base_url + '/fapi/v1/premiumIndex'
+                ) as response:
                 data = await response.json()
-                funding_dict = {}
                 for item in data:
                     symbol = item.get('symbol')
-                    if symbol in symbols_list:
-                        funding = float(item.get('lastFundingRate', 0)) * 100
-                        next_funding_time = int(item.get('nextFundingTime', 0))
-                        funding_dict[symbol] = {
-                            'funding': funding,
-                            'next_funding_time': next_funding_time,
-                        }
-                return funding_dict
-
+                    if symbol in self.symbols.keys():
+                        funding = Decimal(float(item.get('lastFundingRate', 0))) * 100
+                        next_funding_time = Decimal(int(item.get('nextFundingTime', 0)))
+                        self.symbols[symbol].funding = funding
+                        self.symbols[symbol].next_funding = next_funding_time
+                        self.symbols[symbol].last_funding_update = time.time()
         except Exception as error:
-            self.logger.error(f'[BINANCE ERROR] Ошибка при запросе фандингов с API\nОшибка - {error}')
+            self.logger.error(f'[BINANCE][FUNDING][ERROR]\nОшибка при запросе фандингов с API\nОшибка - {error}')
 
-    async def _usd_to_contracts(
+    async def _convert_usd_contracts(
             self,
             usd_amount: Decimal,
             price: Decimal,
@@ -112,33 +148,11 @@ class WS_binance:
 
         price = Decimal(price)
         usd_amount = Decimal(usd_amount)
+    
+        stepSize = self.symbols[symbol].order_rules.stepSize
+        minQty = self.symbols[symbol].order_rules.minQty
+        min_notional = self.symbols[symbol].order_rules.min_notional
 
-        # грузим инфу по символу
-        if symbol not in self.symbols_order_info:
-            async with self.session.get(self.url_4_symbol) as response:
-                raw = await response.json()
-
-                # ищем нужный символ в списке
-                symbol_data = next((s for s in raw["symbols"] if s["symbol"] == symbol), None)
-                if not symbol_data:
-                    self.logger.error(f"[BINANCE ORDER] Нет данных по символу {symbol}")
-                    return None
-                self.symbols_order_info[symbol] = symbol_data
-        else:
-            symbol_data = self.symbols_order_info[symbol]
-    
-        filters = symbol_data["filters"]
-    
-        lot_size = next((f for f in filters if f["filterType"] == "MARKET_LOT_SIZE"), None)
-        if lot_size is None:
-            lot_size = next(f for f in filters if f["filterType"] == "LOT_SIZE")
-    
-        notional_filter = next(f for f in filters if f["filterType"] == "MIN_NOTIONAL")
-    
-        stepSize = Decimal(lot_size["stepSize"])
-        minQty = Decimal(lot_size["minQty"])
-        min_notional = Decimal(notional_filter["notional"])
-    
         if usd_amount < min_notional:
             self.logger.warning(
                 f"[BINANCE SYSTEM] Объём {usd_amount} USD слишком мал "
@@ -158,17 +172,6 @@ class WS_binance:
             return None
     
         return qty.quantize(stepSize, rounding=ROUND_DOWN)
-    
-    def _make_signature(
-            self,
-            query_str: str,
-            secret_key: str,
-    ):
-        return hmac.new(
-            secret_key.encode('utf-8'),
-            query_str.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
 
 
     async def place_order(
@@ -189,7 +192,7 @@ class WS_binance:
 
         usd_count = volume
 
-        quantity_size = await self._usd_to_contracts(
+        quantity_size = await self._convert_usd_contracts(
             usd_amount=usd_count,
             price=price,
             symbol=symbol,

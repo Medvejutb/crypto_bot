@@ -9,43 +9,80 @@ import hashlib
 import base64
 import time
 import os
+from models import SymbolExchange, Order_rules, Base_exchange
 from pprint import pprint
 
+class Bitget_order_rules(Order_rules):
+    size_multiplier: Decimal | None = None
+    volume_place: Decimal | None = None
+    min_trade: Decimal | None = None
+    min_usdt: Decimal | None = None
+    max_qty: Decimal | None = None
 
-
-class WS_bitget:
-    def __init__(self, logger, cache_manager):
-        self.logger = logger
-        self.cache_manager = cache_manager
-        self.ready_event = asyncio.Event()
-        self.symbols = []
-        self.data = {'stock': 'bitget'}
-        self.ready = False
-        self.url_socket = 'wss://ws.bitget.com/v2/ws/public'
-        self.api_base_market = 'https://api.bitget.com/api/v2/mix/market/'
-        self.url_order = "https://api.bitget.com/api/v2/mix/order/place-order"
-        self.connection = False
-        self.session = None
-        self.symbols_info_4_order = {}
-        load_dotenv()
+class Bitget(Base_exchange):
+    def __init__(self, to_manager_queue):
+        super().__init__(to_manager_queue)
+        self.exchange_name = 'bitget'
+        self.to_manager_queue = to_manager_queue
         self.API_KEY = os.getenv('BITGET_API_KEY')
         self.SECRET_KEY = os.getenv('BITGET_SECRET_KEY')
         self.PASSWORD = os.getenv('BITGET_PASSWORD')
+        self.socket_url = 'wss://ws.bitget.com/v2/ws/public'
+        self.base_url = 'https://api.bitget.com'
 
-    async def ping_loop(self, websocket):
+    async def _ping_loop(self, websocket):
         while True:
             try:
                 await websocket.send("ping")
                 await asyncio.sleep(20)
             except Exception as e:
-                self.logger.error(f"[BITGET PING ERROR] {e}")
+                self.logger.error(f"[BITGET][PING][ERROR] {e}")
                 return
-    async def open_client(self):
-        self.session = aiohttp.ClientSession()
 
-    async def start_socket(self):
-        await self.open_client()
-        await self.get_symbols()
+    async def _get_symbols(self):
+        while True:
+            try:
+                async with self.session.get(
+                    f'{self.api_base_market}/api/v2/mix/market/contracts?productType=USDT-FUTURES'
+                ) as response:
+                    raw = await response.json()
+                    data = raw['data']
+
+                    for item in data:
+
+                        symbolType = item.get('symbolType') == "perpetual"
+                        symbolStatus = item.get('symbolStatus') == "normal"
+                        minTradeNum = item.get('minTradeNum') > 0
+                        sizeMultiplier = item.get('sizeMultiplier') > 0
+
+                        if (
+                            symbolType and
+                            symbolStatus and
+                            minTradeNum and
+                            sizeMultiplier
+                        ):
+
+                            symbol = item['symbol']
+                            self.symbols[symbol] = SymbolExchange(
+                                symbol=symbol,
+                                exchange=self.exchange_name,
+                                order_rules=Bitget_order_rules(
+                                    size_multiplier=Decimal(item['sizeMultiplier']),
+                                    volume_place=Decimal(item['volumePlace']),
+                                    min_trade=Decimal(item['minTradeNum']),
+                                    min_usdt=Decimal(item['minTradeUSDT']),
+                                    max_qty=Decimal(item['maxMarketOrderQty']),
+                                )
+                            )
+                break
+            except Exception as error:
+                self.logger.error(
+                    f'[{self.exchange_name}][ERROR]\n{error}'
+                )
+    
+    async def run(self):
+        await self._get_symbols()
+        asyncio.create_task(self._wait_ready())
 
         subscribe_settings = {
             "op": "subscribe",
@@ -54,7 +91,7 @@ class WS_bitget:
                     "instType": "USDT-FUTURES",
                     "channel": "ticker",
                     "instId": symbol
-                } for symbol in self.symbols
+                } for symbol in self.symbols.keys()
             ]
         }
 
@@ -66,12 +103,10 @@ class WS_bitget:
                         close_timeout=5
                 ) as websocket:
                     
-                    ping_task = asyncio.create_task(self.ping_loop(websocket))
-
+                    ping_task = asyncio.create_task(self._ping_loop(websocket))
+                    await websocket.send(json.dumps(subscribe_settings))
                     self.connection = True
                     self.logger.debug('[BITGET SYSTEM] Соединение установлено')
-
-                    await websocket.send(json.dumps(subscribe_settings))
                     self.logger.debug('[BITGET SOCKET] Подписка отправлена')
 
                     while True:
@@ -92,166 +127,76 @@ class WS_bitget:
                             next_funding_time = data.get('nextFundingTime')
                             time = data.get('ts')
 
-                            self.data[symbol] = {
-                                'price': last_price,
-                                'funding': float(funding) * 100,
-                                'next_funding_time': next_funding_time,
-                                'time': time
-                            }
+                            self.symbols[symbol].price = last_price
+                            self.symbols[symbol].funding = funding
+                            self.symbols[symbol].next_funding = int(next_funding_time) / 1000
+                            self.symbols[symbol].last_funding_update = time.time()
 
-                            await self.cache_manager.set_price(symbol, 'bitget', last_price)
-                            await self.cache_manager.set_funding(symbol, 'bitget', float(funding)*100, next_funding_time)
-
-                            if not self.ready and len(self.data) > 30:
-                                self.logger.success('[BITGET SYSTEM] Данных достаточно. Биржа готова.')
-                                self.ready = True
-                                self.ready_event.set()
+                        await self.to_manager_queue.put(self.symbols[symbol])
 
             except Exception as error:
+                self.connection = False
                 self.logger.error(f'[BITGET ERROR] Произошла ошибка в сокете - {error}. Попытка реконнекта через 2 секунды')
                 await asyncio.sleep(2)
             finally:
                 if 'ping_task' in locals():
                     ping_task.cancel()
 
-    async def get_symbols(self):
-        while True:
-            try:
-                async with self.session.get(
-                    f'{self.api_base_market}tickers?productType=USDT-FUTURES'
-                ) as response:
-                    data = await response.json()
-                    self.symbols = []
-                    for item in data['data']:
-                        symbol = item.get('symbol')
-                        last_price = item.get('lastPr')
-                        if symbol and last_price and float(last_price) > 0:
-                            self.symbols.append(symbol)
-
-                break
-            except Exception as error:
-                self.logger.error(f'[BITGET ERROR] Ошибка при сборе символов - {error}. Повтор через 1 сек')
-                await asyncio.sleep(1)
-
-        while True:
-            try:
-                async with self.session.get(
-
-                    f'{self.api_base_market}'
-                    f'contracts?productType=USDT-FUTURES'
-                    
-                    ) as response:
-                    raw = await response.json()
-                    data = raw['data']
-                    for item in data:
-                        symbol = item['symbol']
-                        self.symbols_info_4_order.setdefault(symbol, item)
-                        # pprint(self.symbols_info_4_order)
-                    break
-            except Exception as error:
-                self.logger.error(f'[BITGET ERROR] Ошибка при сборе инфы символов для ордеров - {error}. Повтор через 1 сек')
-                await asyncio.sleep(1)
-                
-
-    def get_prices_data(self):
-        return self.data
-
-
-    async def get_funding_4_cur_symbols(self, symbol: str) -> dict:
-        """
-        TODO:
-        Ошибка при получении фандинга по LINEAUSDT - 'NoneType' object is not subscriptable
-
-
-        Получает funding rate и next funding time по одному символу с Bitget API.
-        Без кэша. Только жёсткий API.
-
-        :param symbol: Тикер символа (например, BTCUSDT)
-        :return: dict с ключами: funding, next_funding_time
-        """
-        self.logger.debug(f'[BITGET SYSTEM] Получение фандинга по {symbol}')
-
-        while True:
-            try:
-                async with self.session.get(
-
-                    f'{self.api_base_market}'
-                    f'current-fundRate?symbol={symbol}&productType=usdt-futures'
-                    
-                    ) as funding_response:
-
-                    funding_data = await funding_response.json()
-                    funding = float(funding_data['data']['fundingRate']) * 100
-                
-                async with self.session.get(
-
-                    f'{self.api_base_market}'
-                    f'funding-time?symbol={symbol}&productType=usdt-futures'
-
-                ) as time_response:
-                    time_data = await time_response.json()
-                    next_time = int(time_data['data'][0]['nextFundingTime'])
-                    
-                funding_dict = {}
-                funding_dict[symbol] = {
-                    'funding': funding,
-                    'next_funding_time': next_time,
-                }
-                return funding_dict
-            except Exception as error:
-                self.logger.error(f'[BITGET ERROR] Ошибка при получении фандинга по {symbol} - {error}. Повтор через 5 сек')
-                await asyncio.sleep(5)
-
     def _timestamp(
             self
     ):
         return str(int(time.time() * 1000))
+    
+    def _convert_usd_contracts(self, usd_amount, price, symbol):
+        
+        usd_volume = Decimal(usd_amount)
+        price = Decimal(price)
 
-    def convert_usd_to_contracts(self,
-                        symbol: str,
-                        usd_volume: Decimal,
-                        price: Decimal,
-                        ):
-        try:
-            price = Decimal(str(price))
+        if price == 0:
+            self.logger.warning(
+                f'[BITGET][ORDER][WARNING]\nпрайс равен нулю'
+            )
+            return None
 
-            if symbol not in self.symbols_info_4_order.keys():
-                self.logger.info(
-                    f'[BITGET SYSTEM] Символ {symbol} не торгуется'
-                )
-                return None
+        order_rules: Bitget_order_rules = self.symbols[symbol].order_rules
 
-            contract_info = self.symbols_info_4_order[symbol]
-            sizeMultiplier = Decimal(str(contract_info['sizeMultiplier']))
-            usd_volume = Decimal(str(usd_volume))
-        except Exception as error:
+        base_qty = usd_volume / price
+
+        size_multiplier = order_rules.size_multiplier
+        base_qty = (base_qty / size_multiplier).to_integral_value(rounding=ROUND_DOWN) * size_multiplier
+
+        volume_place = order_rules.volume_place
+        quant = Decimal('1').scaleb(-volume_place)
+
+        base_qty = base_qty.quantize(quant, rounding=ROUND_DOWN)
+
+        min_trade = order_rules.min_trade
+        min_usdt = order_rules.min_usdt
+        max_qty = order_rules.max_qty
+
+        if base_qty < min_trade:
             self.logger.error(
-                f'[BITGET SYSTEM] Ошибка в конвертации USD в контракты - возможно не найден символ: {error}'
-                )
+                f'[BITGET ORDER] количество базового актива ({base_qty}) < минимального объема сделки ({min_trade})'
+            )
             return None
 
-        try:
-            minTradeNum = Decimal(contract_info['minTradeNum'])
-            volumePlace = Decimal(contract_info['volumePlace'])
-            minTradeNum = Decimal(contract_info['minTradeNum'])
-            
-            contract_value = price * sizeMultiplier
-            contracts_count = usd_volume / contract_value
+        if base_qty * price < min_usdt:
+            self.logger.error(
+                f'[BITGET ORDER] сумма сделки в $ ({base_qty * price}) < минимальной ({min_usdt})'
+            )
+            return None
 
-            contracts_count = contracts_count.quantize(volumePlace, rounding=ROUND_DOWN)
-
-            if contracts_count < minTradeNum:
-                self.logger.warning(
-                    f"[BITGET SYSTEM] Объём {contracts_count} контрактов ({usd_volume} USD) слишком мал для {symbol}, минималка {minTradeNum} контрактов"
-                )
-                return None
-            
-            return str(contracts_count)
-        
-        except Exception as error:
-            self.logger.error(f'[BITGET SYSTEM] Ошибка в конвертации USD в контракты - {error}')
+        if base_qty > max_qty:
+            self.logger.error(
+                f'[BITGET ORDER] количество базового актива ({base_qty}) > максимального объема сделки ({max_qty})'
+            )
             return None
         
+        size = format(base_qty, 'f')
+
+        return size
+
+
     def _sign(
         self,
         timestamp,
@@ -282,6 +227,7 @@ class WS_bitget:
             "Content-Type": "application/json",
         }
 
+
     async def place_order(
         self,
         symbol: str,
@@ -295,13 +241,15 @@ class WS_bitget:
             request_path = "/api/v2/mix/order/place-order"
             method = 'POST'
 
-            size = self.convert_usd_to_contracts(
+            size = self._convert_usd_contracts(
                 symbol=symbol,
                 usd_volume=usd_count,
                 price=price,
             )
             if size is None:
                 return None
+
+            size = str(size)
 
             body = {
                 "symbol": symbol,

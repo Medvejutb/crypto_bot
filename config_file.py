@@ -1,13 +1,7 @@
-
-"""Настройки телеграм"""
-
-BOT_TOKEN = '7858814635:AAGa6pJYQs0-WE-pkOX9gZDQcVuhKPk5zIk'
-CHAT_ID = 5608629096
-
-
 # Интервал между проверками раскорреляций для уведомлений
 CHECK_INTERVAL = 20
 
+FUNDING_UPDATE_INTERVAL = 30
 
 """Настрокий для раскорреляции"""
 
@@ -18,11 +12,11 @@ UNCORRELATION_PARA = 1.5
 SPREAD = 0.5
 
 # Все доступные биржи для поиска раскорреляций
-EXCHANGES = ['binance', 'okx', 'bybit', 'bitget']
+EXCHANGES = ['binance', 'bitget'] #  'okx', 'bybit',
 
 """Настройки ордер менеджера"""
 ORDER_CONF = {
-    'fake_order': False, #Выключает выполнение ордеров, просто симулирует
+    'fake_order': True, #Выключает выполнение ордеров, просто симулирует
 }
 
 

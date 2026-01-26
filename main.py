@@ -13,8 +13,12 @@ from sockets_manager import Sockets_manager
 from uncorrelation_manager import Uncorrelation_manager
 from utils.views import Logging_manager
 from order_manager import Order_manager
+from dotenv import load_dotenv
+import os
 
-bot = Bot(token=config_file.BOT_TOKEN)
+load_dotenv()
+
+bot = Bot(token=os.getenv('TG_BOT_ID'))
 
 tg_dispatcher = Dispatcher()
 
@@ -37,19 +41,17 @@ uncorrelation_manager = Uncorrelation_manager(
         logger=logger,
         cache_manager=cache_manager,
         funding_manager=funding_manager,
-        bot=bot,
-        chat_id=config_file.CHAT_ID,
         interval=config_file.CHECK_INTERVAL,
         exchanges=config_file.EXCHANGES,
         spread=config_file.SPREAD,
-        get_raw_sockets_data=sockets_manager.get_prices_from_exchanges,
+        from_sockets_queue=sockets_manager.to_uncor_queue,
         sockets_ready_event=sockets_manager.sockets_ready_event,
         )
 
 alert_manager = Alert_manager(
     logger=logger,
     bot=bot,
-    chat_id=config_file.CHAT_ID,
+    chat_id=os.getenv('CHAT_ID'),
     interval=config_file.CHECK_INTERVAL,
     cache_manager=cache_manager,
     )
@@ -68,9 +70,6 @@ positions_dispatcher = Position_dispatcher(
     position_config=position_config,
     alert_queue=alert_manager.pos_queue,
     )
-
-
-
 
 @tg_dispatcher.message()
 async def get_id(message: Message):
@@ -127,3 +126,10 @@ async def main():
 
 
 asyncio.run(main())
+
+"""
+TODO: 
+теперь все должно храниться в объектах
+редиска только для быстрого рестарта
+
+"""

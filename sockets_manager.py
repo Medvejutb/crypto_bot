@@ -1,93 +1,137 @@
-import asyncio
-from exchanges.binance_socket import WS_binance
-from exchanges.bitget_socket import WS_bitget
-from exchanges.okx import WS_okx
-from exchanges.bybit_socket import WS_bybit
-from exchanges.gate_socket import WS_gate
-from utils.math_operations import Calculator
+import asyncio, time, copy
+
+from exchanges.exch_register import EXCHANGE_REGISTRY
+from config_file import EXCHANGES as conf_exch_list
+from config_file import FUNDING_UPDATE_INTERVAL
+
+from models import Symbol, SymbolExchange, Base_exchange
 from pprint import pprint
 
 
 class Sockets_manager:
+    """
+    TODO:
+    - инициализация объектов символов
+    - грамотное создание экземпляров бирж:
+        - бинанс и битгет уже переделаны и переименованы
+    """
     def __init__(self, logger, cache_manager):
         self.logger = logger
         self.cache_manager = cache_manager
         self.sockets_ready_event = asyncio.Event()
-        self.binance = WS_binance(self.logger, self.cache_manager)
-        self.bitget = WS_bitget(self.logger, self.cache_manager)
-        self.okx = WS_okx(self.logger, self.cache_manager)
-        self.bybit = WS_bybit(self.logger, self.cache_manager)
-        self.gate = WS_gate(self.logger, self.cache_manager)
-        self.calculator = Calculator()
-        self.stocks_dict = {}
-        self.spreads = {}
-        self._stocks_prices_funcs = {
-            'binance': self.binance.get_prices_data,
-            'bitget': self.bitget.get_prices_data,
-            'okx': self.okx.get_prices_data,
-            'bybit': self.bybit.get_prices_data,
-            # 'gate':
-        }
-        self.stocks_fundings_funcs = {
-            'binance': self.binance.get_funding_4_cur_symbols,
-            'bitget': self.bitget.get_funding_4_cur_symbols,
-            'okx': self.okx.get_funding_4_cur_symbols,
-            'bybit': self.bybit.get_funding_4_cur_symbols,
-            # 'gate': self.gate.get_funding_4_cur_symbols
-        }
-        self.order_funcs = {
-            "binance": self.binance.place_order,
-            "bitget": self.bitget.place_order,
-            "okx": self.okx.place_order,
-            "bybit": None,
-            "gate": None,
-        }
+        self.from_sockets_queue = asyncio.Queue()
+        self.to_uncor_queue = asyncio.Queue()
+        self.symbols: dict[str, Symbol] = {}
 
-
-    async def start_all_sockets(self, queue):
+        self.exchanges: dict[str, Base_exchange] = {}
         
-        try:
-        
-            asyncio.create_task(self.binance.start_socket())
-
-            asyncio.create_task(self.bitget.start_socket())
-
-            asyncio.create_task(self.okx.start_socket(queue))
-
-            asyncio.create_task(self.bybit.start_socket(queue))
-
-            # asyncio.create_task(self.gate.start_socket(queue))
-
-
-
-            await asyncio.gather(
-                self.binance.ready_event.wait(),
-                self.bitget.ready_event.wait(),
-                self.okx.ready_event.wait(),
-                self.bybit.ready_event.wait(),
-                # self.gate.ready_event.wait()
-
-            )
-            self.sockets_ready_event.set()
-            self.logger.success('[SYSTEM] Биржи все биржи готовы')
-        
-        except Exception as error:
-            self.logger.error(f'[SOCKETS ERROR] Ошибка в менеджере сокетов - {error}')
-    
-    def _collect_stocks_prices_data(self):
-
-        results = {}
-        for exchange, func in self._stocks_prices_funcs.items():
+        for exch in conf_exch_list:
             try:
-                for symbol, data in func().items():
-                    results.setdefault(symbol, {})[exchange] = data
-                
-            except Exception as error:
-                self.logger.error(f'[WEBSOCKETS SYSTEM] Произошла ошибка при объединений данных с бирж\nОшибка - {error}, {exchange}')
-                
-        return results
+                cls = EXCHANGE_REGISTRY[exch]
+                self.exchanges[exch] = cls(self.from_sockets_queue)
+            except Exception as e:
+                self.logger.warning(f'[EXCHANGES MANAGER][WARNING]\n{e}')
     
-    def get_prices_from_exchanges(self):
-        results = self._collect_stocks_prices_data()
-        if results:
-            return results
+    async def get_funding(
+            self,
+            exch_name,
+            symbol,
+    ):
+        result = await self.exchanges[exch_name].get_funding(symbol)
+        return result
+    
+    async def place_order(
+            self,
+            exch_name,
+            symbol,
+            usd,
+            price,
+            **kwargs,
+    ):
+        await self.exchanges[exch_name].place_order(
+            symbol=symbol,
+            price=price,
+            volume=usd,
+            **kwargs,
+        )
+    
+    async def _wait_ready(self) -> None:
+        """
+        В фоне ждёт, пока на всех биржах соберется достаточно символов        
+        """
+        await asyncio.gather(*(exch.ready_event.wait() for exch in self.exchanges.values()))
+        self.sockets_ready_event.set()
+        self.logger.success("[EXCHANGES MANAGER]\nВсе биржи готовы")
+
+    async def update_fundings(self) -> None:
+        try:
+            for symbol_obj in self.symbols.values():
+                for exch_obj in symbol_obj.exchanges.values():
+                    if time.time() >= exch_obj.next_funding:
+                        await self.exchanges[exch_obj.exchange].get_funding(symbol_obj.symbol)
+                        await asyncio.sleep(0.5)
+            self.logger.debug('[EXCHANGES MANAGER][FUNDING]\nФандинги обновлены')
+        except Exception as e:
+            self.logger.error(f'[EXCHANGES MANAGER][FUNDING][ERROR]\n{e}')
+
+    async def _funding_loop(self) -> None:
+        while True:
+            await self.update_fundings()
+            await asyncio.sleep(FUNDING_UPDATE_INTERVAL)
+
+    async def _start_all_sockets(self) -> None:
+
+        try:
+            tasks = []
+
+            for exch_name, exch_obj in self.exchanges.items():
+                if hasattr(exch_obj, 'run'):
+                    tasks.append(asyncio.create_task(exch_obj.run()))
+
+            if tasks:
+                await asyncio.gather(*tasks)
+                
+        except Exception as error:
+            self.logger.error(f'[EXCHANGES MANAGER][ERROR]\nexchange - {exch_name}\n{error}')
+
+
+    async def run(self):
+        """
+        Асинхронный воркер, который запускает все биржевые сокеты,
+        ждёт их готовности, непрерывно собирает поступающие тики из очереди,
+        обновляет состояние всех символов и швыряет атомарный snapshot в очередь для дальнейшей обработки.
+        """
+        asyncio.create_task(
+            self._start_all_sockets()
+        )
+        await self._wait_ready()
+        
+        asyncio.create_task(
+            self._funding_loop()
+        )
+
+        while True:
+            try:
+                update_batch = []
+                while True:
+                    try:
+                        update = self.from_sockets_queue.get_nowait()
+                        update_batch.append(update)
+                    except asyncio.QueueEmpty:
+                        break
+                for update in update_batch:
+                    for sym_exch_obj in update:
+                        symbol_name = sym_exch_obj.symbol
+                        symbol_obj: SymbolExchange = self.symbols.setdefault(
+                            symbol_name, Symbol(
+                                symbol=symbol_name,
+                            )
+                        )
+                        symbol_obj.exchanges[sym_exch_obj.exchange] = sym_exch_obj
+                
+                snapshot = copy.deepcopy(self.symbols)
+                await self.to_uncor_queue.put(snapshot)
+
+            except Exception as error:
+                self.logger.error(f'[EXCHANGES MANAGER][ERROR]\n{error}')
+    
